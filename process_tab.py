@@ -6,9 +6,10 @@ from PyQt5.QtCore import *
 from data_process import *  # Import all process functions
 
 class ProcessRow(QWidget):
-    def __init__(self, entity_type, id_type, file_path, selected_column, parent=None):
+    def __init__(self, feature_label, entity_type, id_type, file_path, selected_column, parent=None):
         super().__init__(parent)
 
+        self.feature_label = feature_label  # Add feature_label to the class
         self.entity_type = entity_type
         self.id_type = id_type
         self.file_path = file_path
@@ -17,13 +18,15 @@ class ProcessRow(QWidget):
         # Layout for the row
         self.layout = QVBoxLayout(self)
 
-        # Display entity type and file path
+        # Display feature label, entity type and file path
         entity_layout = QHBoxLayout()
-        entity_label = QLabel(entity_type)
+        feature_label_display = QLabel(f"Feature Label: {feature_label}")  # Display feature label
+        entity_label = QLabel(f"Entity Type: {entity_type}")
         self.process_button = QPushButton("Process")
         self.process_button.setFixedWidth(100)
 
         # Add widgets to the layout
+        entity_layout.addWidget(feature_label_display)  # Add feature label to the layout
         entity_layout.addWidget(entity_label)
         entity_layout.addWidget(self.process_button)
 
@@ -51,10 +54,11 @@ class ProcessRow(QWidget):
         process_func = process_functions.get(self.entity_type)
         if process_func:
             try:
-                process_func(self.entity_type, self.id_type, self.file_path, self.selected_column)
-                QMessageBox.information(self, "Success", f"Processing {self.entity_type} completed successfully.")
+                # Pass feature_label along with other parameters to the processing function
+                process_func(self.entity_type, self.id_type, self.file_path, self.selected_column, self.feature_label)  # Now passing feature_label
+                QMessageBox.information(self, "Success", f"Processing {self.entity_type} ({self.feature_label}) completed successfully.")
             except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to process {self.entity_type}: {str(e)}")
+                QMessageBox.critical(self, "Error", f"Failed to process {self.entity_type} ({self.feature_label}): {str(e)}")
         else:
             QMessageBox.critical(self, "Error", f"No processing function found for entity type: {self.entity_type}")
 
@@ -65,9 +69,9 @@ class ProcessTab(QWidget):
         self.layout = QVBoxLayout(self)
         self.process_rows = []
 
-        # Create a ProcessRow for each entry in read_info_list
-        for entity_type, id_type, file_path, selected_column in read_info_list:
-            row = ProcessRow(entity_type, id_type, file_path, selected_column)
+        # Create a ProcessRow for each entry in read_info_list, now with feature_label
+        for feature_label, entity_type, id_type, file_path, selected_column in read_info_list:
+            row = ProcessRow(feature_label, entity_type, id_type, file_path, selected_column)
             self.process_rows.append(row)
             self.layout.addWidget(row)
 
@@ -75,9 +79,12 @@ class ProcessTab(QWidget):
         self.layout.addStretch()
 
     def get_process_info(self):
-        """Get selected columns from all rows."""
+        """Get selected columns from all rows, including feature_label."""
         process_info_list = []
         for row in self.process_rows:
             selected_column = row.selected_column
-            process_info_list.append(selected_column)
+            process_info_list.append({
+                "feature_label": row.feature_label,  # Include feature_label in the info
+                "selected_column": selected_column
+            })
         return process_info_list

@@ -1,0 +1,34 @@
+gene_expression
+cnv_data
+
+
+9898	22	49780301	49781900  BRD1
+
+49773283.0,49827873.0,protein_coding,bromodomain containing 1,HGNC:1102,BRD1,ENSG00000100425
+
+
+
+def get_gene_names(chromosome, start, end):
+    genes = ensembl_data.genes_at_locus(contig=chromosome, position=start, end=end)
+    gene_names = [gene.gene_name for gene in genes]
+    return ', '.join(gene_names) if gene_names else None
+
+
+
+
+Processing row 9898: START = 49780301, END = 49781900
+Gene name(s) found: nan, AP2A1, ZNF423, KLHDC2, BRD1, VWC2, KPNA3, GRM5P1, GRM5P1, FAM117A, AGBL4, IP6K1
+
+Right:
+22	49780301	49781900	DUP48274	DUP	Consensus.III	3	3	4	3	...	BRD1
+
+Wrong:
+22	49780301	49781900	DUP48274	DUP	Consensus.III	3	3	4	3	...	nan, AP2A1, ZNF423, KLHDC2, BRD1, VWC2, KPNA3, GRM5P1, GRM5P1, FAM117A, AGBL4, IP6K1
+
+
+
+"MEG_G001901, MEG_G191718","KDM4A-AS1, KDM4A"
+
+"MEG_G009594, MEG_G189946","AGBL4-IT1, AGBL4",
+
+"MEG_G008255, MEG_G028168","NCMAP-DT;RCAN3AS, RCAN3",
