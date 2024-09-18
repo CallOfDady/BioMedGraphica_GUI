@@ -197,8 +197,6 @@ def process_gene(entity_type, id_type, file_path, selected_column, feature_label
             print(f"Exported {svtype} data to {output_file_path}")
 
         print(f"CNV data processing completed.")
-        
-        return cnv_data
     
     def process_gene_methyl(gene_entity_data):
         """Process Gene Methylation data."""
@@ -416,8 +414,6 @@ def process_protein(entity_type, id_type, file_path, selected_column, feature_la
     protein_grouped.to_csv(output_file_path, sep=",", index=False)
 
     print(f"Protein data processing completed. Output saved to {output_file_path}")
-
-    return protein_grouped
 
 def process_drug(entity_type, id_type, file_path, selected_column, feature_label):
     """Process Drug data."""
