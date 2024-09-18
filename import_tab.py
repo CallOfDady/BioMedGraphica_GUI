@@ -35,7 +35,7 @@ class UploadRow(QWidget):
 
         # Entity id type dropdown
         self.id_types_dict = {
-            "Gene": ["Ensembl_Gene_ID", "Locus-based ID", "Ensembl_Gene_ID_Version", "HGNC_ID", "OMIM_ID", "NCBI_ID", "RefSeq_ID", "GO_ID"],
+            "Gene": ["Ensembl_Gene_ID", "Locus-based ID", "HGNC_Symbol", "Ensembl_Gene_ID_Version", "HGNC_ID", "OMIM_ID", "NCBI_ID", "RefSeq_ID", "GO_ID"],
             "Transcript": ["Ensembl_Transcript_ID", 'ensembl_gene_id', "Ensembl_Transcript_ID_Version", "Ensembl_Gene_ID", "Reactome_ID", "RefSeq_ID", "RNACentral_ID"],
             "Protein": ["Ensembl_Protein_ID", "Ensembl_Protein_ID_Version", "RefSeq_ID", "Uniprot_ID"],
             "Drug": ["PubChem_CID_ID", "PubChem_SID_ID", "CAS_ID", "NDC_ID", "UNII_ID", "InChI_ID", "ChEBI_ID", "DrugBank_ID"],
