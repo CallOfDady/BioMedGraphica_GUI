@@ -4,7 +4,17 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from itertools import cycle
-from data_process import *  # Import all process functions
+from data_process import *
+
+from entity_process.gene_process import *
+from entity_process.transcript_process import *
+from entity_process.protein_process import *
+from entity_process.drug_process import *
+from entity_process.disease_process import *
+from entity_process.phenotype_process import *
+
+import sys
+import traceback
 
 class WorkerSignals(QObject):
     finished = pyqtSignal()
@@ -85,7 +95,7 @@ class ProcessRow(QWidget):
             QMessageBox.critical(self, "Error", f"No processing function found for entity type: {self.entity_type}")
 
 class ProcessTab(QWidget):
-    def __init__(self, read_info_list, parent=None):
+    def __init__(self, read_info_list=None, parent=None):
         super().__init__(parent)
 
         self.layout = QVBoxLayout(self)
@@ -99,11 +109,15 @@ class ProcessTab(QWidget):
         self.timer.timeout.connect(self.update_loading_animation)
         self.loading_label.hide()  # Initially hide the label
 
-        # Create a ProcessRow for each entry in read_info_list
-        for feature_label, entity_type, id_type, file_path, selected_column in read_info_list:
-            row = ProcessRow(feature_label, entity_type, id_type, file_path, selected_column)
-            self.process_rows.append(row)
-            self.layout.addWidget(row)
+        # Create a ProcessRow for each entry in read_info_list if it's provided
+        if read_info_list:
+            for feature_label, entity_type, id_type, file_path, selected_column in read_info_list:
+                row = ProcessRow(feature_label, entity_type, id_type, file_path, selected_column)
+                self.process_rows.append(row)
+                self.layout.addWidget(row)
+
+        # Add cache path section
+        self.add_cache_path_section()
 
         # Add some spacing at the bottom
         self.layout.addStretch()
@@ -137,3 +151,53 @@ class ProcessTab(QWidget):
         exctype, value, traceback_str = error
         QMessageBox.critical(self, "Error", f"An error occurred: {value}\n{traceback_str}")
         self.loading_label.hide()
+
+    def add_cache_path_section(self):
+        """Add a section at the bottom for Cache path and controls."""
+        cache_layout = QVBoxLayout()
+
+        # Cache path label
+        cache_label = QLabel("Cache path:")
+        cache_layout.addWidget(cache_label)
+
+        # Create the horizontal layout for the input and buttons
+        path_layout = QHBoxLayout()
+
+        # Path input field
+        self.cache_path_input = QLineEdit("./cache")  # Default to ./cache
+        path_layout.addWidget(self.cache_path_input)
+
+        # Browse button
+        self.browse_button = QPushButton("Browse")
+        self.browse_button.clicked.connect(self.browse_cache_path)
+        path_layout.addWidget(self.browse_button)
+
+        # Process all button
+        self.process_all_button = QPushButton("Process All")
+        self.process_all_button.clicked.connect(self.process_all_data)
+        path_layout.addWidget(self.process_all_button)
+
+        # Add the path layout to the cache layout
+        cache_layout.addLayout(path_layout)
+
+        # Add some spacing at the bottom
+        cache_layout.addStretch()
+
+        # Add the cache layout to the main layout
+        self.layout.addLayout(cache_layout)
+
+    def browse_cache_path(self):
+        """Open a file dialog to select the cache directory."""
+        directory = QFileDialog.getExistingDirectory(self, "Select Cache Directory", "./")
+        if directory:
+            self.cache_path_input.setText(directory)
+
+    def process_all_data(self):
+        """Handle processing all data from the cache path in a separate thread."""
+        cache_path = self.cache_path_input.text()
+        
+        # Start the process in a separate thread
+        worker = Worker(process_all_data, cache_path)
+        worker.signals.finished.connect(self.on_processing_complete)
+        worker.signals.error.connect(self.on_processing_error)
+        self.threadpool.start(worker)

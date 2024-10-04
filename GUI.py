@@ -51,7 +51,7 @@ class MedGraphica(QMainWindow):
         cp = QDesktopWidget().availableGeometry().center()
         qr.moveCenter(cp)
         self.move(qr.topLeft())
-    
+
         # Create the central widget and layout
         self.central_widget = QWidget(self)
         self.setCentralWidget(self.central_widget)
@@ -64,13 +64,13 @@ class MedGraphica(QMainWindow):
         # Create tabs
         self.import_tab = ImportTab()
         self.read_tab = None
-        self.process_tab = None
+        self.process_tab = ProcessTab([])  # Initialize ProcessTab with empty data
         self.export_tab = QWidget()
 
         # Add tabs to the tab widget
         self.tab_widget.addTab(self.import_tab, "Import")
         self.tab_widget.addTab(QWidget(), "Read")
-        self.tab_widget.addTab(QWidget(), "Process")
+        self.tab_widget.addTab(self.process_tab, "Process")  # Allow direct access to ProcessTab
         self.tab_widget.addTab(self.export_tab, "Export")
 
         # Create layouts for export tab (currently empty)
@@ -112,9 +112,9 @@ class MedGraphica(QMainWindow):
     def go_to_next_tab(self):
         """Go to the next tab based on the current tab"""
         current_index = self.tab_widget.currentIndex()
-        
+
         print(f"Current Tab Index: {current_index}")  # Debug info
-        
+
         if current_index == 0:
             worker = Worker(self.handle_import_next)
             worker.signals.result.connect(self.update_read_tab_data)  # Connect to update_read_tab_data slot
@@ -122,9 +122,18 @@ class MedGraphica(QMainWindow):
             worker = Worker(self.handle_read_next)
             worker.signals.result.connect(self.update_process_tab_data)  # Connect to update_process_tab_data slot
         elif current_index == 2:
+            if self.process_tab is None:
+                self.process_tab = ProcessTab([])  # Initialize ProcessTab with empty data if not created
+                self.tab_widget.removeTab(2)
+                self.tab_widget.insertTab(2, self.process_tab, "Process")
+            # Allow to switch to ProcessTab even if previous steps are not completed
+            self.tab_widget.setCurrentIndex(2)
+            self.update_buttons()
+            return  # Exit here, as no further threading is required
+        else:
             worker = Worker(self.handle_process_next)
             worker.signals.result.connect(self.update_export_tab)  # Connect to update_export_tab slot
-        
+
         worker.signals.finished.connect(self.on_thread_complete)
         worker.signals.error.connect(self.on_thread_error)
 
@@ -210,6 +219,8 @@ class MedGraphica(QMainWindow):
         """Update the states of the navigation buttons"""
         current_index = self.tab_widget.currentIndex()
         self.previous_button.setEnabled(current_index > 0)
+        
+        # Allow "Next" to disappear only on the last tab (export tab)
         self.next_button.setVisible(current_index < self.tab_widget.count() - 1)
         self.finish_button.setVisible(current_index == self.tab_widget.count() - 1)
 

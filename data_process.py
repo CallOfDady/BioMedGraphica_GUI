@@ -1,431 +1,220 @@
 # data_process.py
 
+import os
 import pandas as pd
-import numpy as np
+from collections import defaultdict
 
-def process_gene(entity_type, id_type, file_path, selected_column, feature_label):
-    """Process Gene data."""
-    print(f"Processing Gene: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}, Feature Label: {feature_label}")
+def process_all_data(cache_path):
+    """
+    Process all data from the specified cache directory.
     
-    # Load the gene entity data
-    gene_entity_data = pd.read_csv('medgraphica_data/medgraphica_gene.csv')    
-        
-    # Determine the separator based on the file extension
-    if file_path.endswith('.txt') or file_path.endswith('.tsv'):
-        sep = '\t'
-    elif file_path.endswith('.csv'):
-        sep = ','
-    else:
-        raise ValueError("Unsupported file type. Please provide a .txt, .tsv, or .csv file.")
+    Args:
+        cache_path (str): The path to the cache directory.
+    """
+    if not os.path.exists(cache_path):
+        print(f"Cache path does not exist: {cache_path}")
+        return
 
-    def process_gene_expression(gene_entity_data):
-        """Process Gene Expression data."""
-        print(f"Processing Gene Expression for {entity_type} with Feature Label: {feature_label}")
+    all_gene_dataframes = {}  # Dictionary to hold the dataframes
+    grouped_gene_sets = defaultdict(list)  # Dictionary to group gene sets by file prefix
 
-        # Read the gene expression file
-        gene_expression = pd.read_csv(file_path, sep=sep)
+    # Iterate through all files in the cache directory
+    for filename in os.listdir(cache_path):
+        file_path = os.path.join(cache_path, filename)
 
-        # Process gene_id by stripping the version number
-        gene_expression[selected_column] = gene_expression[selected_column].apply(lambda x: x.split('.')[0])
-
-        # Retain only the necessary columns
-        gene_entity_data = gene_entity_data[[id_type, 'MedGraphica_ID', 'HGNC_Symbol']].copy()
-
-        # Merge the gene expression data with the gene entity data
-        merged_data = pd.merge(
-            gene_expression,
-            gene_entity_data,
-            left_on=selected_column,
-            right_on=id_type,
-            how='inner'
-        )
-
-        # Replace 'Nan' strings with actual NaN values
-        merged_data.replace('Nan', pd.NA, inplace=True)
-
-        # Drop rows where 'MedGraphica_ID' is NaN (if any)
-        merged_data.dropna(subset=['MedGraphica_ID'], inplace=True)
-
-        # Ensure 'MedGraphica_ID' and 'HGNC_Symbol' are the first and second columns, respectively
-        cols = ['MedGraphica_ID', 'HGNC_Symbol'] + [col for col in merged_data.columns if col not in ['MedGraphica_ID', 'HGNC_Symbol', selected_column, id_type]]
-        gene_expression_new = merged_data[cols]
-        
-        # Select numeric columns
-        numeric_cols = gene_expression_new.select_dtypes(include=[np.number]).columns.tolist()
-
-        # Group by 'MedGraphica_ID' and calculate the mean for all numeric columns
-        gene_expression_new = gene_expression_new.groupby('MedGraphica_ID')[numeric_cols].mean()
-
-        # Reset the index to turn 'MedGraphica_ID' back into a column
-        gene_expression_new.reset_index(inplace=True)
-
-        # Merge back the gene names after grouping by 'MedGraphica_ID'
-        gene_expression_new = pd.merge(gene_expression_new, gene_entity_data[['MedGraphica_ID', 'HGNC_Symbol']], on='MedGraphica_ID', how='left')
-
-        # Rename 'HGNC_Symbol' to 'Gene_Name'
-        gene_expression_new.rename(columns={'HGNC_Symbol': 'Gene_Name'}, inplace=True)
-
-        # Ensure 'MedGraphica_ID' is first, 'Gene_Name' is second, and other columns follow the original order
-        final_cols = ['MedGraphica_ID', 'Gene_Name'] + [col for col in gene_expression_new.columns if col not in ['MedGraphica_ID', 'Gene_Name']]
-        gene_expression_new = gene_expression_new[final_cols]
-
-        # Export the result to a CSV file
-        output_file_path = f'cache/{entity_type.lower()}_{feature_label.lower()}.csv'
-        gene_expression_new.to_csv(output_file_path, sep=",", index=False)
-
-        print(f"Gene expression data processing completed. Output saved to {output_file_path}")
-
-    def process_gene_cnv(gene_entity_data):
-        """Process Gene CNV data."""
-        print(f"Processing Gene CNV for {entity_type} with Feature Label: {feature_label}")
-        
-        def get_gene_names(chrom, start, end):
-            """Retrieve gene names and medgraphica_ids if the given chrom, start, and end positions are within the gene's chromosome, start, and end positions."""
+        # Ensure it's a file and not a directory
+        if os.path.isfile(file_path):
+            # Get the filename without extension and append '_df' to create a variable name
+            base_name = os.path.splitext(filename)[0]
+            variable_name = f"{base_name}_df"
+            print(f"Processing file: {file_path}")
             
-            # Convert 'Gene start (bp)', 'Gene end (bp)', and 'chromosome' columns to numeric
-            gene_entity_data['Gene_Start'] = pd.to_numeric(gene_entity_data['Gene_Start'], errors='coerce')
-            gene_entity_data['Gene_End'] = pd.to_numeric(gene_entity_data['Gene_End'], errors='coerce')
-            gene_entity_data['Chromosome'] = pd.to_numeric(gene_entity_data['Chromosome'], errors='coerce')
+            # Read the CSV file into a DataFrame
+            dataframe = pd.read_csv(file_path)
+            all_gene_dataframes[variable_name] = dataframe
+            print(f"Loaded {variable_name} with {dataframe.shape[0]} records.")
 
-            # Filter rows by chromosome first
-            matching_genes = gene_entity_data[gene_entity_data['Chromosome'] == chrom]
+            # Extract the file prefix for grouping (take the first two parts of the name separated by underscore)
+            prefix_parts = base_name.split("_")
+            prefix = "_".join(prefix_parts[:2])  # Take only the first two parts
+            if 'Gene_Name' in dataframe.columns:
+                gene_set = set(dataframe['Gene_Name'].str.strip().str.upper())  # Convert to uppercase for consistency
+                grouped_gene_sets[prefix].append(gene_set)
+    
+    # Now for each group, take the union of the gene sets
+    combined_gene_sets = {}
+    for prefix, gene_set_list in grouped_gene_sets.items():
+        combined_gene_sets[prefix] = set.union(*gene_set_list)  # Take union within each group
+        print(f"Combined gene set for {prefix}: {len(combined_gene_sets[prefix])} genes")
+    
+    # After combining by prefix, now take the intersection of all combined gene sets
+    if combined_gene_sets:
+        common_genes = set.intersection(*combined_gene_sets.values())
+        print(f"Number of common genes after intersection: {len(common_genes)}")
+        print(common_genes)
+
+        # Convert the intersection back to a list, if needed
+        common_genes_list = list(common_genes)
+        print(f"Common genes list has {len(common_genes_list)} items.")
+
+    common_genes_df = pd.DataFrame(common_genes_list, columns=['Gene_Name'])
+    print(common_genes_df)
+    common_genes_df = common_genes_df.sort_values('Gene_Name').reset_index(drop=True)
+    common_genes_df.to_csv('common_genes.csv', index=False)
+
+    # print(all_gene_dataframes)
+
+    for variable_name, df in all_gene_dataframes.items():
+        # Perform an inner merge to keep only common genes
+        if 'Gene_Name' in df.columns:
+            # Merge with `common_genes_df` to filter only the common genes
+            filtered_df = pd.merge(common_genes_df, df, on='Gene_Name', how='inner')
+            all_gene_dataframes[variable_name] = filtered_df  # Replace the original dataframe with the filtered one
+            print(f"Filtered {variable_name}, new shape: {filtered_df.shape}")
+
+    # print('Filtered all gene dataframes:')
+    # print(all_gene_dataframes)
+    
+    print("Finished processing all files in the cache.")
+
+    ROSMAP_biospecimen = pd.read_csv('E:\LabWork\mosGraphFlow\ROSMAP-raw\Meta-Data\ROSMAP_biospecimen_metadata.csv', sep=',')
+    
+    # Split the 'specimenID' and construct the matching ID
+    ROSMAP_biospecimen['matching_id'] = ROSMAP_biospecimen['specimenID'].apply(lambda x: '.'.join(x.split('.')[2:4]))
+
+    # TODO: Load the clinical data
+    survival = pd.read_csv('E:\LabWork\mosGraphFlow\ROSMAP-raw\ROSMAP_clinical\ROSMAP_clinical.csv', sep=',')
+    
+    original_column_mappings = {}
+
+    # Process Protein DataFrames and store the original column mappings
+    matching_id_to_individual_protein = dict(zip(ROSMAP_biospecimen['matching_id'], ROSMAP_biospecimen['individualID']))
+    for variable_name, df in all_gene_dataframes.items():
+        if "protein" in variable_name.lower():  # Check if the variable name contains "protein"
+            print(f"Processing DataFrame: {variable_name}")
+
+            # Save original column mappings (before updating)
+            original_column_mappings[variable_name] = {
+                'original_columns': df.columns.tolist(),
+                'individual_ids': [matching_id_to_individual_protein.get(col, col) for col in df.columns]
+            }
+
+            # Update the column names using the dictionary
+            df.columns = [matching_id_to_individual_protein.get(col, col) for col in df.columns]
+
+            # Update the DataFrame in the dictionary
+            all_gene_dataframes[variable_name] = df
+            print(f"Updated column names for {variable_name}")
+
+    # Process Methylation DataFrames and store the original column mappings
+    matching_id_to_individual_methy = dict(zip(ROSMAP_biospecimen['specimenID'], ROSMAP_biospecimen['individualID']))
+    for variable_name, df in all_gene_dataframes.items():
+        if "methy" in variable_name.lower():  # Check if the variable name contains "methy"
+            print(f"Processing DataFrame: {variable_name}")
+
+            # Save original column mappings (before updating)
+            original_column_mappings[variable_name] = {
+                'original_columns': df.columns.tolist(),
+                'individual_ids': [matching_id_to_individual_methy.get(col, col) for col in df.columns]
+            }
+
+            # Update the column names using the dictionary
+            df.columns = [matching_id_to_individual_methy.get(col, col) for col in df.columns]
+
+            # Update the DataFrame in the dictionary
+            all_gene_dataframes[variable_name] = df
+            print(f"Updated column names for {variable_name}")
+
+    
+    # Process Gene Expression DataFrames and store the original column mappings
+    def process_gene_column_name(col_name):
+        parts = col_name.split('_')
+        return '_'.join(parts[:2]) if len(parts) > 1 else col_name
+
+    matching_id_to_individual_gene = dict(zip(ROSMAP_biospecimen['specimenID'], ROSMAP_biospecimen['individualID']))
+
+    for variable_name, df in all_gene_dataframes.items():
+        if "expression" in variable_name.lower():  # Check if the variable name contains "expression"
+            print(f"Processing DataFrame: {variable_name}")
+
+            # First process the gene column name
+            processed_columns = [process_gene_column_name(col) for col in df.columns]
             
-            # Further filter rows where the start and end positions fall within the gene's start and end positions
-            matching_genes = matching_genes[
-                (matching_genes['Gene_Start'] <= start) & 
-                (matching_genes['Gene_End'] >= end)
-            ]
+            # Save original column mappings (before updating)
+            original_column_mappings[variable_name] = {
+                'original_columns': processed_columns,  # Use processed column names for mapping
+                'individual_ids': [matching_id_to_individual_gene.get(col, col) for col in processed_columns]
+            }
 
-            # Extract the HGNC symbol (gene name) and MedGraphica_ID from the matching genes
-            gene_names = matching_genes['HGNC_Symbol'].tolist()
-            medgraphica_ids = matching_genes['MedGraphica_ID'].tolist()
+            # Then update the column names using the dictionary
+            df.columns = [matching_id_to_individual_gene.get(col, col) for col in processed_columns]
 
-            # Ensure all gene names and medgraphica_ids are strings
-            gene_names = [str(gene) for gene in gene_names]
-            medgraphica_ids = [str(id) for id in medgraphica_ids]
+            # Update the DataFrame in the dictionary
+            all_gene_dataframes[variable_name] = df
+            print(f"Updated column names for {variable_name}")
 
-            # Return both gene names and medgraphica_ids
-            return ', '.join(medgraphica_ids) if medgraphica_ids else None, ', '.join(gene_names) if gene_names else None
+    # Process CNV DataFrames and store the original column mappings
+    matching_id_to_individual_cnv = dict(zip(ROSMAP_biospecimen['specimenID'], ROSMAP_biospecimen['individualID']))
+    for variable_name, df in all_gene_dataframes.items():
+        if "cnv" in variable_name.lower():  # Check if the variable name contains "cnv"
+            print(f"Processing DataFrame: {variable_name}")
+
+            # Save original column mappings (before updating)
+            original_column_mappings[variable_name] = {
+                'original_columns': df.columns.tolist(),
+                'individual_ids': [matching_id_to_individual_cnv.get(col, col) for col in df.columns]
+            }
+
+            # Update the column names using the dictionary
+            df.columns = [matching_id_to_individual_cnv.get(col, col) for col in df.columns]
+
+            # Update the DataFrame in the dictionary
+            all_gene_dataframes[variable_name] = df
+            print(f"Updated column names for {variable_name}")
+
+    # At this point, you can create the mapping DataFrames using the original_column_mappings dictionary
+    map_dataframes = {}
+
+    # Create mapping DataFrames based on original column mappings
+    for variable_name, mapping in original_column_mappings.items():
+        original_cols = mapping['original_columns']
+        individual_ids = mapping['individual_ids']
         
-        # Read the CNV file
-        cnv = pd.read_csv(file_path, sep=sep)
-        print(f"CNV data loaded. Columns available: {cnv.columns.tolist()}")
-
-        # Split the selected_column (e.g., "START, END") into two column names
-        start_col, end_col = selected_column.split(', ')
-        print(f"Selected columns for START: {start_col}, END: {end_col}")
+        # Create the mapping DataFrame and add to map_dataframes dictionary
+        mapping_df = pd.DataFrame({
+            'original_column': original_cols,
+            'individualID': individual_ids
+        })
         
-        # Find the chromosome column in the CNV DataFrame
-        chrom_col = [col for col in cnv.columns if 'CHROM' in col.upper()]
-        if not chrom_col:
-            raise ValueError("No chromosome column found with 'CHROM' in the name.")
-        chrom_col = chrom_col[0]
-        print(f"Chromosome column identified: {chrom_col}")
-        
-        # Initialize empty lists to store gene names and medgraphica_ids
-        gene_names = []
-        medgraphica_ids = []
+        # Save to the map_dataframes dictionary
+        map_dataframes[f"{variable_name}_map"] = mapping_df
 
-        # Iterate over each row in the CNV DataFrame
-        for index, row in cnv.iterrows():
-            chrom = row[chrom_col]   # Get the chromosome value from the specified chromosome column
-            start = row[start_col]   # Get the start value from the specified start column
-            end = row[end_col]       # Get the end value from the specified end column
-            
-            # Call the get_gene_names function to retrieve the MedGraphica_ID and Gene_Name for the current chrom, start, and end range
-            try:
-                medGraphica_id, gene_name = get_gene_names(chrom, start, end)
-            except Exception as e:
-                print(f"Error during gene name lookup for row {index}: {e}")
-                # Set only missing values to None (i.e., handle partial matches)
-                if 'MedGraphica_ID' not in locals():
-                    medGraphica_id = None
-                if 'Gene_Name' not in locals():
-                    gene_name = None
-            
-            # Ensure MedGraphica_ID and gene_name are strings; if None, convert them to empty strings
-            medgraphica_ids.append(medGraphica_id if medGraphica_id is not None else "")
-            gene_names.append(gene_name if gene_name is not None else "")
-        
-        print("Finished processing all rows. Adding MedGraphica_ID and gene_name columns to CNV data.")
-        
-        # Create a copy of CNV data and add the MedGraphica_ID and gene_name columns
-        cnv_data = cnv.copy()
-        cnv_data['MedGraphica_ID'] = medgraphica_ids
-        cnv_data['Gene_Name'] = gene_names
+    # View mapping dataframes in map_dataframes dictionary
+    for map_name, map_df in map_dataframes.items():
+        print(f"{map_name}:\n{map_df.head()}")
 
-        # Reorder columns to place 'MedGraphica_ID' and 'Gene_Name' at the front
-        cols = ['MedGraphica_ID', 'Gene_Name'] + [col for col in cnv_data.columns if col not in ['MedGraphica_ID', 'Gene_Name']]
-        cnv_data = cnv_data[cols]
-        # cnv_data.to_csv('cache/cnv_data.csv', index=False)
+    # Collect all 'individualID' columns from map_dataframes and survival
+    combined_individualID = pd.concat([
+        map_df['individualID'] for map_df in map_dataframes.values()
+    ] + [survival['individualID']]).unique()
 
-        # Split 'MedGraphica_ID' and 'Gene_Name' by comma and ensure they're synchronized
-        cnv_data['MedGraphica_ID'] = cnv_data['MedGraphica_ID'].str.split(', ')
-        cnv_data['Gene_Name'] = cnv_data['Gene_Name'].str.split(', ')
+    # Create a DataFrame to hold the union of individualIDs
+    union_map = pd.DataFrame(combined_individualID, columns=['individualID'])
 
-        # Check if both columns have the same number of elements before exploding
-        assert cnv_data['MedGraphica_ID'].apply(len).equals(cnv_data['Gene_Name'].apply(len)), "Mismatch in number of elements between 'MedGraphica_ID' and 'Gene_Name'"
+    # Merge with each original map DataFrame in map_dataframes, avoiding column name conflicts
+    for map_name, map_df in map_dataframes.items():
+        # Merge each map DataFrame with union_map based on 'individualID'
+        # Use custom suffixes to avoid conflicts with duplicate column names
+        union_map = union_map.merge(map_df, on='individualID', how='outer', suffixes=('', f'_{map_name}'))
+        print(f"Merged {map_name} with union_map, current shape: {union_map.shape}")
 
-        # Explode both columns so that each pair of MedGraphica_ID and gene_name is on its own row
-        cnv_data_exploded = cnv_data.explode(['MedGraphica_ID', 'Gene_Name'])
+    # Merge with the survival data (including 'projid' and 'Study' columns)
+    union_map = union_map.merge(survival[['individualID', 'projid', 'Study']], on='individualID', how='outer')
+    union_map.to_csv('union_map.csv', index=False)
+    print(union_map)
+    print(all_gene_dataframes)
 
-        # Strip whitespace to ensure clean gene names and medgraphica_ids
-        cnv_data_exploded['Gene_Name'] = cnv_data_exploded['Gene_Name'].str.strip()
-        cnv_data_exploded['MedGraphica_ID'] = cnv_data_exploded['MedGraphica_ID'].str.strip()
-
-        # Filter out rows where 'MedGraphica_ID' or 'Gene_Name' is empty
-        cnv_data_filtered = cnv_data_exploded[(cnv_data_exploded['MedGraphica_ID'] != '') & (cnv_data_exploded['Gene_Name'] != '')]
-        sample_columns = cnv_data_filtered.columns[8:]
-        
-        # Group by 'MedGraphica_ID', 'Gene_Name', and 'SVTYPE' and sum the sample columns
-        cnv_aggregated = cnv_data_filtered.groupby(['MedGraphica_ID', 'Gene_Name', 'SVTYPE'])[sample_columns].sum().reset_index()
-        
-        # Get unique values in 'SVTYPE'
-        unique_svtypes = cnv_aggregated['SVTYPE'].unique()
-        print(f"Unique SVTYPEs: {unique_svtypes}")
-
-        # Iterate over unique SVTYPEs and create separate files for each
-        for svtype in unique_svtypes:
-            svtype_df = cnv_aggregated[cnv_aggregated['SVTYPE'] == svtype]
-
-            # Remove the 'SVTYPE' column as it's no longer needed
-            svtype_df = svtype_df.drop(columns='SVTYPE')
-
-            # Define the output file path
-            output_file_path = f'cache/{entity_type.lower()}_{feature_label.lower()}_{svtype.lower()}.csv'
-            svtype_df.to_csv(output_file_path, sep=",", index=False)
-            print(f"Exported {svtype} data to {output_file_path}")
-
-        print(f"CNV data processing completed.")
-    
-    def process_gene_methyl(gene_entity_data):
-        """Process Gene Methylation data."""
-        # Read the methylation data
-        methylation = pd.read_csv(file_path, sep=sep)
-        
-        # Print the shape of the original methylation data
-        print("Original methylation data shape:", methylation.shape)
-
-        # Expand gene_entity_data so that each gene name in id_type gets its own row
-        gene_entity_expanded = gene_entity_data.copy()
-        gene_entity_expanded = gene_entity_expanded.assign(
-            **{id_type: gene_entity_expanded[id_type].str.split(';')}
-        ).explode(id_type)
-
-        # Merge with methylation data on selected_column
-        methylation_merged = pd.merge(
-            methylation,
-            gene_entity_expanded[[id_type, 'MedGraphica_ID']],
-            left_on=selected_column,
-            right_on=id_type,
-            how='left'
-        )
-
-        # Drop the extra merge key (id_type)
-        methylation_merged.drop(columns=[id_type], inplace=True)
-
-        # Rename selected_column to Gene_Name
-        methylation_merged.rename(columns={selected_column: 'Gene_Name'}, inplace=True)
-
-        # Ensure MedGraphica_ID is the first column
-        cols = ['MedGraphica_ID'] + [col for col in methylation_merged.columns if col != 'MedGraphica_ID']
-        methylation_merged = methylation_merged[cols]
-
-        # Drop rows where MedGraphica_ID is NaN or empty
-        methylation_merged.dropna(subset=['MedGraphica_ID'], inplace=True)
-        methylation_merged = methylation_merged[methylation_merged['MedGraphica_ID'] != '']
-
-        # Print the shape of the merged methylation data
-        print("Merged methylation data shape:", methylation_merged.shape)
-
-        # Find unique values in the 'Region' column
-        unique_regions = methylation_merged['Region'].unique()
-        print("Unique Regions:", unique_regions)
-
-        # Iterate over unique regions and create a new DataFrame for each region, then export
-        for region in unique_regions:
-            # Create a DataFrame specific to the current region
-            region_df = methylation_merged[methylation_merged['Region'] == region]
-            
-            # Convert the region name to lowercase and replace spaces with underscores for the file name
-            region_name = region.lower().replace(' ', '_')
-            
-            # Define the output file path
-            output_file_path = f'cache/{entity_type.lower()}_{feature_label.lower()}_{region_name}.csv'
-            
-            # Export the region-specific DataFrame to a CSV file
-            region_df.to_csv(output_file_path, sep=",", index=False)
-            print(f"Exported {region} data to {output_file_path}")
-
-
-    # Check if the feature_label contains "expression" or "cnv"
-    if "expression" in feature_label.lower():
-        process_gene_expression(gene_entity_data)
-    elif "cnv" in feature_label.lower():
-        process_gene_cnv(gene_entity_data)
-    elif "meth" in feature_label.lower():
-        process_gene_methyl(gene_entity_data)
-    else:
-        print(f"Processing for Feature Label: {feature_label} is not implemented yet.")
-        # Leave space for other feature_label handling in the future
-
-def process_transcript(entity_type, id_type, file_path, selected_column, feature_label):
-    """Process Transcript data."""
-    print(f"Processing Transcript: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}")
-    
-    transcript_entity_data = pd.read_csv('medgraphica_data/medgraphica_transcript.csv')
-
-    # Determine the separator based on the file extension
-    if file_path.endswith('.txt') or file_path.endswith('.tsv'):
-        sep = '\t'
-    elif file_path.endswith('.csv'):
-        sep = ','
-    else:
-        raise ValueError("Unsupported file type. Please provide a .txt, .tsv, or .csv file.") 
-
-    def process_gene_expression(transcript_entity_data):
-        """Process Gene Expression data."""
-        print(f"Processing Gene Expression for {entity_type} with Feature Label: {feature_label}")
-
-        # # Read the gene expression file
-        # gene_expression = pd.read_csv(file_path, sep=sep)
-        # print("Original gene_expression shape:", gene_expression.shape)
-
-        # # Process gene_id by stripping the version number
-        # gene_ids = gene_expression[selected_column].apply(lambda x: x.split('.')[0]).tolist()
-        # gene_expression[selected_column] = gene_ids
-
-        # # Retain only the necessary columns and rename them
-        # transcript_entity_data = transcript_entity_data[[id_type, 'MedGraphica_ID', 'Gene_Name']].copy()
-        # transcript_entity_data.rename(columns={id_type: 'Gene_ID'}, inplace=True)
-        # print("transcript_entity_data shape after selection and rename:", transcript_entity_data.shape)
-
-        # # Drop NaN and duplicates from transcript_entity_data
-        # transcript_entity_data = transcript_entity_data.dropna(subset=['MedGraphica_ID']).drop_duplicates()
-        # print("transcript_entity_data shape after dropna and drop_duplicates:", transcript_entity_data.shape)
-
-        # # Merge the gene expression data with the transcript entity data on 'gene_id' and keep 'MedGraphica_ID' and 'Gene_Name'
-        # merged_data = pd.merge(gene_expression, transcript_entity_data, on='Gene_ID', how='inner')
-        # print("Merged data shape:", merged_data.shape)
-
-        # # Replace 'Nan' strings with actual NaN values
-        # merged_data.replace('Nan', pd.NA, inplace=True)
-
-        # # Drop rows where 'MedGraphica_ID' is NaN (if any)
-        # merged_data.dropna(subset=['MedGraphica_ID'], inplace=True)
-
-        # # Ensure that 'MedGraphica_ID' and 'Gene_Name' are the first columns, followed by the rest in their original order
-        # cols = ['MedGraphica_ID', 'Gene_Name'] + [col for col in merged_data.columns if col not in ['MedGraphica_ID', 'Gene_Name']]
-        # gene_expression_new = merged_data[cols]
-        # print("gene_expression_new shape after column reordering:", gene_expression_new.shape)
-
-        # # Select numeric columns
-        # numeric_cols = gene_expression_new.select_dtypes(include=[np.number]).columns.tolist()
-
-        # # Group by 'MedGraphica_ID' and calculate the mean for all numeric columns
-        # gene_expression_new = gene_expression_new.groupby('MedGraphica_ID')[numeric_cols].mean()
-        # print("gene_expression_new shape after grouping by 'MedGraphica_ID':", gene_expression_new.shape)
-
-        # # Reset the index to turn 'MedGraphica_ID' back into a column
-        # gene_expression_new.reset_index(inplace=True)
-
-        # # Merge back the gene names after grouping by 'MedGraphica_ID'
-        # gene_expression_new = pd.merge(gene_expression_new, transcript_entity_data[['MedGraphica_ID', 'Gene_Name']], on='MedGraphica_ID', how='left')
-        # print("Final gene_expression_new shape after merging back gene_name:", gene_expression_new.shape)
-
-        # # Ensure 'MedGraphica_ID' is first, 'Gene_Name' is second, and other columns follow the original order
-        # final_cols = ['MedGraphica_ID', 'Gene_Name'] + [col for col in gene_expression_new.columns if col not in ['MedGraphica_ID', 'Gene_Name']]
-        # gene_expression_new = gene_expression_new[final_cols]
-
-        # # Export the result to a CSV file
-        # output_file_path = f'cache/{feature_label.lower()}_{entity_type.lower()}.csv'
-        # gene_expression_new.to_csv(output_file_path, sep=",", index=False)
-
-
-        # print(f"Gene expression data processing completed. Output saved to {output_file_path}")
-
-    # Check if the feature_label contains "expression" or "cnv"
-    if "expression" in feature_label.lower():
-        process_gene_expression(transcript_entity_data)
-    elif "xxx" in feature_label.lower():
-        print(f"Processing xxx data for Transcript: {entity_type} with Feature Label: {feature_label}")
-    else:
-        print(f"Processing for Feature Label: {feature_label} is not implemented yet.")
-        # Leave space for other feature_label handling in the future
-
-def process_protein(entity_type, id_type, file_path, selected_column, feature_label):
-    """Process Protein data."""
-    print(f"Processing Protein: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}")
-    
-    # Load the protein entity data
-    protein_entity_data = pd.read_csv('medgraphica_data/medgraphica_protein.csv')    
-        
-    # Determine the separator based on the file extension
-    if file_path.endswith('.txt') or file_path.endswith('.tsv'):
-        sep = '\t'
-    elif file_path.endswith('.csv'):
-        sep = ','
-    else:
-        raise ValueError("Unsupported file type. Please provide a .txt, .tsv, or .csv file.")
-    
-    # Load the protein data file
-    protein = pd.read_csv(file_path, sep=sep)
-
-    # Rename 'Unnamed: 0' to 'ID_Column' if it exists
-    if 'Unnamed: 0' in protein.columns:
-        protein.rename(columns={'Unnamed: 0': 'ID_Column'}, inplace=True)
-    
-    # Update selected_column if it was 'Unnamed: 0'
-    if selected_column == 'Unnamed: 0':
-        selected_column = 'ID_Column'
-
-    # Split the selected_column into protein_names and protein_ids
-    protein['Gene_Name'] = protein[selected_column].apply(lambda x: x.split('|')[0])  # Extract gene names
-    protein['Protein_ID'] = protein[selected_column].apply(lambda x: x.split('|')[1].split('-')[0])  # Extract protein ids and handle cases with '-'
-    
-    # Select numeric columns for aggregation
-    numeric_cols = protein.select_dtypes(include=[float, int]).columns.tolist()
-
-    # Group by 'Gene_Name' and calculate the mean of each numeric column
-    protein_grouped = protein.groupby('Gene_Name')[numeric_cols].mean().reset_index()
-    
-    # Merge back 'protein_id' to keep them as markers
-    # Use drop_duplicates to ensure we don't multiply the data unnecessarily
-    protein_grouped = pd.merge(protein_grouped, protein[['Gene_Name', 'Protein_ID']].drop_duplicates(), on='Gene_Name', how='left')
-
-    # Merge with protein_entity_data to add 'MedGraphica_ID'
-    protein_grouped = pd.merge(protein_grouped, 
-                               protein_entity_data[[id_type, 'MedGraphica_ID']], 
-                               left_on='Protein_ID', 
-                               right_on=id_type, 
-                               how='left')
-    # Drop rows where 'MedGraphica_ID' is NaN
-    protein_grouped.dropna(subset=['MedGraphica_ID'], inplace=True)
-    # Drop the extra merge key (id_type from protein_entity_data)
-    protein_grouped.drop(columns=[id_type], inplace=True)
-
-    # Ensure 'MedGraphica_ID' is the first column, 'protein_id' second, 'Gene_Name' third
-    final_cols = ['MedGraphica_ID', 'Protein_ID', 'Gene_Name'] + [col for col in protein_grouped.columns if col not in ['MedGraphica_ID', 'protein_id', 'Gene_Name']]
-    protein_grouped = protein_grouped[final_cols]
-    print("Grouped protein data:", protein_grouped.shape)
-
-    # Export the result to a CSV file
-    output_file_path = f'cache/{entity_type.lower()}_{feature_label.lower()}.csv'
-    protein_grouped.to_csv(output_file_path, sep=",", index=False)
-
-    print(f"Protein data processing completed. Output saved to {output_file_path}")
-
-def process_drug(entity_type, id_type, file_path, selected_column, feature_label):
-    """Process Drug data."""
-    print(f"Processing Drug: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}")
-    # TODO
-
-def process_disease(entity_type, id_type, file_path, selected_column, feature_label):
-    """Process Disease data."""
-    print(f"Processing Disease: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}")
-    # TODO
-
-def process_phenotype(entity_type, id_type, file_path, selected_column, feature_label):
-    """Process Phenotype data."""
-    print(f"Processing Phenotype: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}")
-    # TODO
+    union_map_cleaned = union_map.dropna()
+    union_map_cleaned.reset_index(drop=True, inplace=True)
+    print(union_map_cleaned)
+    union_map_cleaned.to_csv('union_map_cleaned.csv', index=False)
