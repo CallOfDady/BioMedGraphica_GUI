@@ -100,7 +100,7 @@ class ReadTab(QWidget):
     def update_loading_animation(self):
         """Update the loading label with the next animation character."""
         char = next(self.animation_chars)
-        self.loading_label.setText(f"Loading columns... {char}")
+        self.loading_label.setText(f"Loading... {char}")
 
     def update_row_columns(self, index, columns):
         """Update the columns for a specific row."""

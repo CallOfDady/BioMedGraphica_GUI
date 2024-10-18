@@ -9,9 +9,11 @@ from data_process import *
 from entity_process.gene_process import *
 from entity_process.transcript_process import *
 from entity_process.protein_process import *
+from entity_process.promoter_process import *
 from entity_process.drug_process import *
 from entity_process.disease_process import *
 from entity_process.phenotype_process import *
+from entity_process.soft_match_process import *
 
 import sys
 import traceback
@@ -59,7 +61,7 @@ class ProcessRow(QWidget):
         feature_label_display = QLabel(f"Feature Label: {feature_label}")
         entity_label = QLabel(f"Entity Type: {entity_type}")
         self.process_button = QPushButton("Process")
-        self.process_button.setFixedWidth(100)
+        self.process_button.setFixedWidth(200)
 
         # Add widgets to the layout
         entity_layout.addWidget(feature_label_display)
@@ -82,6 +84,7 @@ class ProcessRow(QWidget):
             "Gene": process_gene,
             "Transcript": process_transcript,
             "Protein": process_protein,
+            "Promoter": process_promoter,  
             "Drug": process_drug,
             "Disease": process_disease,
             "Phenotype": process_phenotype,
@@ -95,11 +98,21 @@ class ProcessRow(QWidget):
             QMessageBox.critical(self, "Error", f"No processing function found for entity type: {self.entity_type}")
 
 class ProcessTab(QWidget):
-    def __init__(self, read_info_list=None, parent=None):
-        super().__init__(parent)
 
+    show_dialog_signal = pyqtSignal(dict)
+
+    def __init__(self, read_info_list=None, matcher=None, phenotype_embeddings=None, disease_embeddings=None, drug_embeddings=None, parent=None):
+        super().__init__(parent)
+        self.matcher = matcher
+        self.phenotype_embeddings = phenotype_embeddings
+        self.disease_embeddings = disease_embeddings
+        self.drug_embeddings = drug_embeddings
         self.layout = QVBoxLayout(self)
         self.process_rows = []
+        self.selected_entities = {}
+
+        # Connect the signal to the slot that shows the dialog
+        self.show_dialog_signal.connect(self.show_multi_dialog)
 
         # Add loading label
         self.loading_label = QLabel("Processing data...")
@@ -134,10 +147,87 @@ class ProcessTab(QWidget):
         """Start processing data in the background."""
         self.loading_label.show()  # Show the loading label
         self.timer.start(100)  # Start the animation timer
-        worker = Worker(process_func, row.entity_type, row.id_type, row.file_path, row.selected_column, row.feature_label)
+        
+        # Check the entity type and pass the appropriate embeddings
+        if row.entity_type == "Phenotype":
+            embeddings = self.phenotype_embeddings
+        elif row.entity_type == "Disease":
+            embeddings = self.disease_embeddings
+        elif row.entity_type == "Drug":
+            embeddings = self.drug_embeddings
+        else:
+            embeddings = None  # Handle other cases if necessary
+
+        # Check if the id_type contains "name" to determine the process function
+        if "name" in row.id_type.lower():
+            # If id_type contains "name", use process_entities_file
+            worker = Worker(
+                process_entities,  # Call process_entities
+                row.entity_type,
+                row.id_type,
+                row.file_path,
+                row.selected_column,
+                row.feature_label,
+                matcher=self.matcher,
+                embeddings=embeddings,
+                selection_callback=self.emit_show_dialog_signal
+            )
+        else:
+            # none matcher func
+            worker = Worker(
+                process_func,
+                row.entity_type,
+                row.id_type,
+                row.file_path,
+                row.selected_column,
+                row.feature_label
+            )
+
         worker.signals.finished.connect(self.on_processing_complete)
         worker.signals.error.connect(self.on_processing_error)
         self.threadpool.start(worker)
+
+    def emit_show_dialog_signal(self, all_topk_phenotypes, entity_type, id_type, file_path, selected_column, feature_label, phenotype):
+        """Emit signal to show dialog in the main thread."""
+        self.entity_type = entity_type
+        self.id_type = id_type
+        self.file_path = file_path
+        self.selected_column = selected_column
+        self.feature_label = feature_label
+        self.phenotype = phenotype
+
+        self.show_dialog_signal.emit(all_topk_phenotypes)
+
+    def show_multi_dialog(self, all_topk_entities):
+        """Display the multi-selection dialog in the main thread."""
+        print("Preparing to show multi-selection dialog for all entities.")
+
+        # Pop up a dialog for multi-selection
+        dialog = MultiEntitySelectionDialog(all_topk_entities)
+        if dialog.exec_() == QDialog.Accepted:
+            selected_entities = dialog.get_selected_entities()
+            if selected_entities:
+                self.selected_entities = selected_entities
+                print(f"User selections: {self.selected_entities}")
+                # Continue processing after selection
+                self.continue_processing_after_selection()
+        else:
+            print("No selections made")
+
+    def continue_processing_after_selection(self):
+        """Pass the selected entities back for further processing."""
+        process_entities_file(
+            self.entity_type,
+            self.id_type,
+            self.feature_label,
+            self.phenotype,
+            self.selected_column,
+            self.selected_entities
+        )
+
+        self.timer.stop()
+        self.loading_label.setText("Processing complete.")
+        QTimer.singleShot(2000, self.loading_label.hide)
 
     def on_processing_complete(self):
         """Handle processing completion."""
@@ -201,3 +291,65 @@ class ProcessTab(QWidget):
         worker.signals.finished.connect(self.on_processing_complete)
         worker.signals.error.connect(self.on_processing_error)
         self.threadpool.start(worker)
+
+class MultiEntitySelectionDialog(QDialog):
+    def __init__(self, all_topk_entities, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Correct Entities")
+
+        self.resize(1000, 800)
+
+        self.selected_entities = {}
+
+        # Layout for the dialog
+        self.layout = QVBoxLayout(self)
+
+        # Instruction label
+        instruction_label = QLabel("Select the correct match for each entity:")
+        self.layout.addWidget(instruction_label)
+
+        # Table to display entities and options
+        self.table_widget = QTableWidget(self)
+        self.table_widget.setRowCount(len(all_topk_entities))
+        self.table_widget.setColumnCount(2)  # Column 0: Entity, Column 1: Options
+        self.table_widget.setHorizontalHeaderLabels(["Entity", "Select Matching Term"])
+
+        # Set column widths
+        self.table_widget.setColumnWidth(0, 300)
+        self.table_widget.setColumnWidth(1, 400)
+
+        # Populate the table with entity options
+        for row_idx, (entity_value, topk_entities) in enumerate(all_topk_entities.items()):
+            # Entity column
+            entity_item = QTableWidgetItem(entity_value)
+            self.table_widget.setItem(row_idx, 0, entity_item)
+
+            # ComboBox for selecting matching term
+            combo_box = QComboBox()
+            for med_id, hpo_term in topk_entities:
+                combo_box.addItem(f"{med_id}, {hpo_term}", (med_id, hpo_term))
+            self.table_widget.setCellWidget(row_idx, 1, combo_box)
+
+        self.layout.addWidget(self.table_widget)
+
+        # OK and Cancel buttons
+        button_layout = QHBoxLayout()
+        self.ok_button = QPushButton("OK")
+        self.cancel_button = QPushButton("Cancel")
+        button_layout.addWidget(self.ok_button)
+        button_layout.addWidget(self.cancel_button)
+        self.layout.addLayout(button_layout)
+
+        # Connect buttons to actions
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+    def get_selected_entities(self):
+        """Return the selected entities as a dictionary."""
+        selected_entities = {}
+        for row_idx in range(self.table_widget.rowCount()):
+            entity_value = self.table_widget.item(row_idx, 0).text()
+            combo_box = self.table_widget.cellWidget(row_idx, 1)
+            selected_entity = combo_box.currentData()  # Get selected med_id, hpo_term tuple
+            selected_entities[entity_value] = [selected_entity]
+        return selected_entities

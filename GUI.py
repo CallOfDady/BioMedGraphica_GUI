@@ -1,13 +1,14 @@
-# GUI.py
-
 import sys
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
+from itertools import cycle
 from import_tab import ImportTab
 from read_tab import ReadTab, read_file
 from process_tab import ProcessTab
 import traceback
+from entity_process.soft_match.entity_match import EntityMatcher
+import time
 
 class WorkerSignals(QObject):
     finished = pyqtSignal()
@@ -22,7 +23,6 @@ class Worker(QRunnable):
         self.args = args
         self.kwargs = kwargs
         self.signals = WorkerSignals()
-        self.kwargs['progress_callback'] = self.signals.progress
 
     @pyqtSlot()
     def run(self):
@@ -38,13 +38,18 @@ class Worker(QRunnable):
             self.signals.finished.emit()
 
 class MedGraphica(QMainWindow):
-    def __init__(self):
+    def __init__(self, matcher, phenotype_embeddings, disease_embeddings, drug_embeddings):
         super().__init__()
+
+        self.matcher = matcher
+        self.phenotype_embeddings = phenotype_embeddings
+        self.disease_embeddings = disease_embeddings
+        self.drug_embeddings = drug_embeddings
 
         # Set main window properties
         self.setWindowTitle("MedGraphica")
         self.setWindowIcon(QIcon("images/UI/logo.png"))
-        self.resize(1000, 400)  # Initial window size
+        self.resize(2000, 800)  # Initial window size
 
         # Center the window on the screen
         qr = self.frameGeometry()
@@ -151,7 +156,7 @@ class MedGraphica(QMainWindow):
         exctype, value, traceback_str = error
         QMessageBox.critical(self, "Error", f"An error occurred: {value}\n{traceback_str}")
 
-    def handle_import_next(self, progress_callback):
+    def handle_import_next(self):
         """Handle the Next button in the Import tab"""
         file_info_list, error_message = self.import_tab.get_all_file_info()
         if error_message:
@@ -167,7 +172,6 @@ class MedGraphica(QMainWindow):
         self.tab_widget.insertTab(1, self.read_tab, "Read")
         print(f"Total files uploaded: {len(file_info_list)}")
         print("File Info:", file_info_list)
-
         # Start reading files and extracting columns in the background
         for i, (feature_label, entity_type, id_type, file_path) in enumerate(file_info_list):
             worker = Worker(self.read_file_columns, file_path, id_type)
@@ -182,7 +186,7 @@ class MedGraphica(QMainWindow):
         """Update the ReadTab with the columns extracted from the file"""
         self.read_tab.update_row_columns(index, columns)
 
-    def handle_read_next(self, progress_callback):
+    def handle_read_next(self):
         """Handle the Next button in the Read tab"""
         print("Reading the data...")
         read_info = self.read_tab.get_read_info()
@@ -190,15 +194,18 @@ class MedGraphica(QMainWindow):
         
         # Return read_info, which will be used to create the ProcessTab in the main thread
         return read_info
-
+    
     def update_process_tab_data(self, read_info):
         """Update the Process tab data by creating ProcessTab in the main thread"""
         # Delay the creation of ProcessTab to minimize GUI update time
-        self.process_tab = ProcessTab(read_info)
+        self.process_tab = ProcessTab(read_info, matcher=self.matcher,
+                                    phenotype_embeddings=self.phenotype_embeddings, 
+                                    disease_embeddings=self.disease_embeddings, 
+                                    drug_embeddings=self.drug_embeddings)
         self.tab_widget.removeTab(2)
         self.tab_widget.insertTab(2, self.process_tab, "Process")
-
-    def handle_process_next(self, progress_callback):
+    
+    def handle_process_next(self):
         """Handle the Next button in the Process tab"""
         print("Processing the data...")
         # Get the process info in the background thread
@@ -224,8 +231,77 @@ class MedGraphica(QMainWindow):
         self.next_button.setVisible(current_index < self.tab_widget.count() - 1)
         self.finish_button.setVisible(current_index == self.tab_widget.count() - 1)
 
+class LoadingDialog(QDialog):
+    def __init__(self, message, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Loading...")
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+        label = QLabel(message)
+        layout.addWidget(label)
+
+        self.setFixedSize(600, 200)
+
+        self.loading_label = QLabel()
+        layout.addWidget(self.loading_label)
+
+        self.animation_chars = cycle(["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"])
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_loading_animation)
+        self.timer.start(100)  # Update every 100ms
+
+    def update_loading_animation(self):
+        char = next(self.animation_chars)
+        self.loading_label.setText(f"Loading... {char}")
+
+def load_models():
+    """Function to load models and embeddings"""
+    matcher = EntityMatcher(model_path='dmis-lab/biobert-v1.1', device='cuda')
+    matcher.load_model()
+    disease_embeddings = matcher.load_embeddings("entity_process/soft_match/disease_embeddings.pt")
+    phenotype_embeddings = matcher.load_embeddings("entity_process/soft_match/phenotype_embeddings.pt")
+    drug_embeddings = matcher.load_embeddings("entity_process/soft_match/drug_embeddings.pt")
+    return matcher, phenotype_embeddings, disease_embeddings, drug_embeddings
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = MedGraphica()
-    window.show()
+
+    # Set font properties
+    font = QFont()
+    font.setPointSize(14)
+    app.setFont(font)
+
+    # Create loading dialog
+    loading_dialog = LoadingDialog("Loading BioBERT model, please wait...")
+    loading_dialog.show()
+
+    # Define a worker to load models and embeddings
+    def on_load_complete(result):
+        print("Model loading complete. Preparing to show main window...")
+        matcher, phenotype_embeddings, disease_embeddings, drug_embeddings = result
+
+        global window  # Make window a global variable to prevent it from being garbage collected
+        window = MedGraphica(matcher, phenotype_embeddings, disease_embeddings, drug_embeddings)
+        window.show()
+        loading_dialog.close()
+
+    def start_main_window(matcher, phenotype_embeddings, disease_embeddings, drug_embeddings):
+        window = MedGraphica(matcher, phenotype_embeddings, disease_embeddings, drug_embeddings)
+        window.show()
+
+    def on_load_error(error):
+        exctype, value, traceback_str = error
+        print(f"Error occurred during model loading: {value}\n{traceback_str}")  # Debug print
+        loading_dialog.close()
+        QMessageBox.critical(None, "Error", f"Failed to load model: {value}\n{traceback_str}")
+        sys.exit(1)
+    
+    # Load models in the background
+    worker = Worker(load_models)
+    worker.signals.result.connect(on_load_complete)
+    worker.signals.error.connect(on_load_error)
+
+    # Start the worker
+    QThreadPool.globalInstance().start(worker)
     sys.exit(app.exec_())

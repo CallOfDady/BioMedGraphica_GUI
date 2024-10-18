@@ -22,13 +22,13 @@ class UploadRow(QWidget):
 
         # Omics Feature Label input
         self.feature_label = QLineEdit()
-        self.feature_label.setFixedWidth(150)
+        self.feature_label.setFixedWidth(300)
         self.feature_label.setPlaceholderText("Omics Feature Label")
 
         # Entity type dropdown
         self.entity_type = QComboBox()
-        self.entity_type.setFixedWidth(150)
-        self.entity_type.addItems(["Gene", "Transcript", "Protein", "Drug", "Disease", "Phenotype"])
+        self.entity_type.setFixedWidth(300)
+        self.entity_type.addItems(["Gene", "Transcript", "Protein", "Promoter", "Drug", "Disease", "Phenotype", "MicroBiome"])
         self.entity_type.setEditable(True)
         self.entity_type.lineEdit().setPlaceholderText("Entity Type")
         self.entity_type.setCurrentIndex(-1)  # Ensure no item is selected by default
@@ -36,16 +36,17 @@ class UploadRow(QWidget):
         # Entity id type dropdown
         self.id_types_dict = {
             "Gene": ["Ensembl_Gene_ID", "Locus-based ID", "HGNC_Symbol", "Ensembl_Gene_ID_Version", "HGNC_ID", "OMIM_ID", "NCBI_ID", "RefSeq_ID", "GO_ID"],
-            "Transcript": ["Ensembl_Transcript_ID", 'ensembl_gene_id', "Ensembl_Transcript_ID_Version", "Ensembl_Gene_ID", "Reactome_ID", "RefSeq_ID", "RNACentral_ID"],
+            "Transcript": ["Ensembl_Transcript_ID", "Ensembl_Transcript_ID_Version", "Ensembl_Gene_ID", "Reactome_ID", "RefSeq_ID", "RNACentral_ID"],
             "Protein": ["Ensembl_Protein_ID", "Ensembl_Protein_ID_Version", "RefSeq_ID", "Uniprot_ID"],
+            "Promoter": ["Ensembl_Gene_ID", "HGNC_Symbol", "Ensembl_Gene_ID_Version", "HGNC_ID", "OMIM_ID", "NCBI_ID", "RefSeq_ID", "GO_ID"],
             "Drug": ["PubChem_CID_ID", "PubChem_SID_ID", "CAS_ID", "NDC_ID", "UNII_ID", "InChI_ID", "ChEBI_ID", "DrugBank_ID"],
             "Disease": ["OMIM_ID", "ICD11_ID", "ICD10_ID", "DO_ID", "SnomedCT_ID", "UMLS_ID", "MeSHID", "Mondo_ID"],
-            "Phenotype": ["HPO_ID", "OMIM_ID", "Orpha_ID", "UMLS_ID"], 
+            "Phenotype": ["Phenotype_Name", "HPO_ID", "OMIM_ID", "Orpha_ID", "UMLS_ID"], 
             "MicroBiome": ["NCBI_ID", "SILVA_ID", "Greengenes_ID", "RDP_ID", "RNACentral_ID", "GTDB_ID"],
         }
 
         self.id_type = QComboBox()
-        self.id_type.setFixedWidth(220)
+        self.id_type.setFixedWidth(300)
         self.id_type.setEditable(True)
         self.id_type.lineEdit().setPlaceholderText("ID Type")
         self.id_type.setEnabled(False)  # Initially disabled
@@ -103,7 +104,7 @@ class UploadRow(QWidget):
         options = QFileDialog.Options()
         
         # Set a default directory path (you can change this to any directory you prefer)
-        default_dir = "E:\LabWork\mosGraphFlow\ROSMAP-raw"  # Default path, modify as needed
+        default_dir = f"E:/LabWork/MedGraphica_GUI/test_data"  # Default path, modify as needed
         
         file_path, _ = QFileDialog.getOpenFileName(
             self, 
