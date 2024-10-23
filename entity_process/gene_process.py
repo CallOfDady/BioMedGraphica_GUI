@@ -8,7 +8,7 @@ def process_gene(entity_type, id_type, file_path, selected_column, feature_label
     print(f"Processing Gene: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}, Feature Label: {feature_label}")
     
     # Load the gene entity data
-    gene_entity_data = pd.read_csv('data/MedGraphica/Node/Gene/medgraphica_gene.csv')    
+    gene_entity_data = pd.read_csv('data/BioMedGraphica/Node/Gene/biomedgraphica_gene.csv')    
         
     # Determine the separator based on the file extension
     if file_path.endswith('.txt') or file_path.endswith('.tsv'):
@@ -23,121 +23,66 @@ def process_gene(entity_type, id_type, file_path, selected_column, feature_label
         print(f"Processing Gene Expression for {entity_type} with Feature Label: {feature_label}")
 
     def process_gene_cnv(gene_entity_data):
-        """Process Gene CNV data."""
+        """Process Gene CNV data, map Sample_ID to MedGraphica_ID, and export mapping."""
         print(f"Processing Gene CNV for {entity_type} with Feature Label: {feature_label}")
-        
-        # Read the CNV file
+
+        # Step 1: Read the CNV file (in the format Sample_ID | Gene1 | Gene2 | ...)
         cnv = pd.read_csv(file_path, sep=sep)
-        print(f"CNV data loaded. Columns available: {cnv.columns.tolist()}")
 
-        if id_type == 'Locus-based ID':
-            def get_gene_names(chrom, start, end):
-                """Retrieve gene names and medgraphica_ids if the given chrom, start, and end positions are within the gene's chromosome, start, and end positions."""
-                
-                # Convert 'Gene start (bp)', 'Gene end (bp)', and 'chromosome' columns to numeric
-                gene_entity_data['Gene_Start'] = pd.to_numeric(gene_entity_data['Gene_Start'], errors='coerce')
-                gene_entity_data['Gene_End'] = pd.to_numeric(gene_entity_data['Gene_End'], errors='coerce')
-                gene_entity_data['Chromosome'] = pd.to_numeric(gene_entity_data['Chromosome'], errors='coerce')
+        # Step 2: Transpose the CNV data to Gene_Name | S1 | S2 | ... format
+        cnv_transposed = cnv.set_index(selected_column).T.reset_index()
+        cnv_transposed.rename(columns={'index': id_type}, inplace=True)
 
-                # Filter rows by chromosome first
-                matching_genes = gene_entity_data[gene_entity_data['Chromosome'] == chrom]
-                
-                # Further filter rows where the start and end positions fall within the gene's start and end positions
-                matching_genes = matching_genes[
-                    (matching_genes['Gene_Start'] <= start) & 
-                    (matching_genes['Gene_End'] >= end)
-                ]
+        # Step 3: Merge with gene_entity_data to map to MedGraphica_ID
+        gene_entity_data = gene_entity_data[[id_type, 'BioMedGraphica_ID']].copy()
 
-                # Extract the HGNC symbol (gene name) and MedGraphica_ID from the matching genes
-                gene_names = matching_genes['HGNC_Symbol'].tolist()
-                medgraphica_ids = matching_genes['MedGraphica_ID'].tolist()
+        # Merge the CNV data with the gene entity data on id_type
+        cnv_merged = pd.merge(
+            cnv_transposed,
+            gene_entity_data,
+            on=id_type,
+            how='inner'
+        )
 
-                # Ensure all gene names and medgraphica_ids are strings
-                gene_names = [str(gene) for gene in gene_names]
-                medgraphica_ids = [str(id) for id in medgraphica_ids]
+        # Step 4: Extract the id_type and MedGraphica_ID columns as the mapping table
+        # This will create a mapping between the original id_type (e.g., Gene_Name) and MedGraphica_ID
+        mapping_table = cnv_merged[[id_type, 'BioMedGraphica_ID']].drop_duplicates()
+        mapping_table = mapping_table.rename(columns={id_type: 'Original_ID'})
+    
+        # Save the mapping table to a separate CSV file
+        map_output_file = f'cache/id_mapping/{feature_label.lower()}_id_map.csv'
+        mapping_table.to_csv(map_output_file, sep=",", index=False)
+        print(f"mapping saved to {map_output_file}")
 
-                # Return both gene names and medgraphica_ids
-                return ', '.join(medgraphica_ids) if medgraphica_ids else None, ', '.join(gene_names) if gene_names else None
+        # Step 5: Drop the 'id_type' column after merging
+        cnv_merged.drop(columns=[id_type], inplace=True)
+
+        # Step 6: Ensure 'BioMedGraphica_ID' is the first column
+        cols = ['BioMedGraphica_ID'] + [col for col in cnv_merged.columns if col not in ['BioMedGraphica_ID']]
+        cnv_data = cnv_merged[cols]
+
+        # Select numeric columns (which are now samples, i.e., S1, S2, etc.)
+        numeric_cols = cnv_data.select_dtypes(include=[np.number]).columns.tolist()
+
+        # Group by 'BioMedGraphica_ID' and calculate the mean for all numeric columns
+        cnv_data.loc[:, numeric_cols] = cnv_data[numeric_cols].fillna(0)
+        cnv_data = cnv_data.groupby('BioMedGraphica_ID')[numeric_cols].mean()
+
+        # Reset the index to turn 'BioMedGraphica_ID' back into a column
+        cnv_data.reset_index(inplace=True)
+
+        # Step 7: Transpose the data back to the original format (Sample_ID | Gene1 | Gene2 | ...)
+        cnv_final = cnv_data.set_index('BioMedGraphica_ID').T.reset_index()
+        cnv_final.rename(columns={'index': selected_column}, inplace=True)
+
+        # Export the final processed CNV data to a CSV file
+        output_file_path = f'cache/{feature_label.lower()}.csv'
+        cnv_final.to_csv(output_file_path, sep=",", index=False)
+
+        print(f"CNV data processing completed. Output saved to {output_file_path}")
             
-            # Split the selected_column (e.g., "START, END") into two column names
-            start_col, end_col = selected_column.split(', ')
-            print(f"Selected columns for START: {start_col}, END: {end_col}")
-            
-            # Find the chromosome column in the CNV DataFrame
-            chrom_col = [col for col in cnv.columns if 'CHROM' in col.upper()]
-            if not chrom_col:
-                raise ValueError("No chromosome column found with 'CHROM' in the name.")
-            chrom_col = chrom_col[0]
-            print(f"Chromosome column identified: {chrom_col}")
-            
-            # Initialize columns in the original CNV DataFrame for MedGraphica_ID and Gene_Name
-            cnv['MedGraphica_ID'] = None
-            cnv['Gene_Name'] = None
 
-            # Iterate over each row in the CNV DataFrame and perform gene name lookup
-            for index, row in cnv.iterrows():
-                chrom = row[chrom_col]  # Get the chromosome value from the specified chromosome column
-                start = row[start_col]  # Get the start value from the specified start column
-                end = row[end_col]      # Get the end value from the specified end column
-                
-                # Call the get_gene_names function to retrieve the MedGraphica_ID and Gene_Name for the current chrom, start, and end range
-                try:
-                    medGraphica_id, gene_name = get_gene_names(chrom, start, end)
-                except Exception as e:
-                    print(f"Error during gene name lookup for row {index}: {e}")
-                    medGraphica_id, gene_name = None, None
-                
-                # Assign MedGraphica_ID and Gene_Name directly to the CNV DataFrame
-                cnv.at[index, 'MedGraphica_ID'] = medGraphica_id
-                cnv.at[index, 'Gene_Name'] = gene_name
-
-            print("Finished processing all rows. MedGraphica_ID and Gene_Name columns have been added to CNV data.")
-
-        
-            cnv.dropna(subset=['MedGraphica_ID'], inplace=True)
-
-            # Drop the chromosome, start, and end columns
-            cnv.drop([chrom_col, start_col, end_col], axis=1, inplace=True)
-
-            # Split 'MedGraphica_ID' and 'Gene_Name' by comma and ensure they're synchronized
-            cnv['MedGraphica_ID'] = cnv['MedGraphica_ID'].str.split(', ')
-            cnv['Gene_Name'] = cnv['Gene_Name'].str.split(', ')
-
-            # Check if both columns have the same number of elements before exploding
-            assert cnv['MedGraphica_ID'].apply(len).equals(cnv['Gene_Name'].apply(len)), "Mismatch in number of elements between 'MedGraphica_ID' and 'Gene_Name'"
-
-            # Explode both columns so that each pair of MedGraphica_ID and Gene_Name is on its own row
-            cnv_exploded = cnv.explode(['MedGraphica_ID', 'Gene_Name'])
-
-            numeric_cols = cnv_exploded.select_dtypes(include=[np.number]).columns.tolist()
-
-            # Group by 'MedGraphica_ID' and calculate the mean for all numeric columns
-            cnv_exploded = cnv_exploded.groupby('MedGraphica_ID')[numeric_cols].mean()
-
-            # Reset the index to turn 'MedGraphica_ID' back into a column
-            cnv_exploded.reset_index(inplace=True)
-
-            # Merge with gene_entity_data to retrieve the Gene_Name (if needed)
-            cnv_exploded = pd.merge(cnv_exploded, gene_entity_data[['MedGraphica_ID', 'HGNC_Symbol']], on='MedGraphica_ID', how='left')
-
-            cnv_exploded.rename(columns={'HGNC_Symbol': 'Gene_Name'}, inplace=True)
-
-            # Remove everything after the first hyphen in Gene_Name (optional, if necessary)
-            cnv_exploded['Gene_Name'] = cnv_exploded['Gene_Name'].apply(lambda x: x.split('-')[0] if pd.notnull(x) else x)
-
-            # Print the shape of the exploded CNV data
-            print(f"Exploded CNV data shape: {cnv_exploded.shape}")
-
-            # Reorder columns
-            final_cols = ['MedGraphica_ID', 'Gene_Name'] + [col for col in cnv_exploded.columns if col not in ['MedGraphica_ID', 'Gene_Name']]
-            cnv_exploded = cnv_exploded[final_cols]
-
-            # Save the processed CNV data to a CSV file
-            output_file_path = f'cache/{feature_label.lower()}.csv'
-            cnv_exploded.to_csv(output_file_path, index=False)
-            print(f"CNV data processing completed.")
-        else:
-            print(f"ID Type: {id_type} is not supported for CNV data processing.")
+    
     
     # Check if the feature_label contains "expression" or "cnv"
     if "expression" in feature_label.lower():

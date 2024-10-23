@@ -12,23 +12,16 @@ def read_file(file_path, id_type):
     _, file_extension = os.path.splitext(file_path)
     
     if file_extension == ".csv":
-        df = pd.read_csv(file_path)
+        df = pd.read_csv(file_path, nrows=0)
     elif file_extension in [".txt", ".tsv"]:
-        df = pd.read_csv(file_path, delimiter='\t')
+        df = pd.read_csv(file_path, delimiter='\t', nrows=0)
     else:
         raise ValueError(f"Unsupported file type: {file_extension}")
-    
-    # Check if id_type is "Locus-based ID" to apply different column filtering
-    if id_type == "Locus-based ID":
-        # Get columns containing "start" or "end"
-        start_columns = [col for col in df.columns if "start" in col.lower()]
-        end_columns = [col for col in df.columns if "end" in col.lower()]
-        
-        # Create combinations of start and end columns
-        valid_columns = [f"{start}, {end}" for start in start_columns for end in end_columns]
-    else:
-        # Default behavior: filter columns with "id" in the name
-        valid_columns = [col for col in df.columns if "id" in col.lower() or "name" in col.lower()]
+    first_5_columns = df.columns[:5]
+    last_5_columns = df.columns[-5:]
+    target_columns = list(first_5_columns) + list(last_5_columns)
+
+    valid_columns = [col for col in target_columns if "id" in col.lower() or "name" in col.lower()]
     
     return valid_columns
 

@@ -46,7 +46,7 @@ class UploadRow(QWidget):
         }
 
         self.id_type = QComboBox()
-        self.id_type.setFixedWidth(300)
+        self.id_type.setFixedWidth(400)
         self.id_type.setEditable(True)
         self.id_type.lineEdit().setPlaceholderText("ID Type")
         self.id_type.setEnabled(False)  # Initially disabled
