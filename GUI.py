@@ -9,6 +9,7 @@ from process_tab import ProcessTab
 import traceback
 from entity_process.soft_match.entity_match import EntityMatcher
 import time
+import os
 
 class WorkerSignals(QObject):
     finished = pyqtSignal()
@@ -264,8 +265,31 @@ def load_models():
     drug_embeddings = matcher.load_embeddings("entity_process/soft_match/drug_embeddings.pt")
     return matcher, phenotype_embeddings, disease_embeddings, drug_embeddings
 
+# Function to ensure necessary directories exist
+def ensure_directories_exist():
+    # Define the paths for the directories
+    cache_dir = ".cache"
+    id_mapping_dir = os.path.join("cache", "id_mapping")
+
+    # Check if .cache directory exists, if not, create it
+    if not os.path.exists(cache_dir):
+        os.makedirs(cache_dir)
+        print(f"Created directory: {cache_dir}")
+    else:
+        print(f"Directory already exists: {cache_dir}")
+
+    # Check if ./cache/id_mapping directory exists, if not, create it
+    if not os.path.exists(id_mapping_dir):
+        os.makedirs(id_mapping_dir)
+        print(f"Created directory: {id_mapping_dir}")
+    else:
+        print(f"Directory already exists: {id_mapping_dir}")
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # Ensure the necessary directories exist
+    ensure_directories_exist()
 
     # Set font properties
     font = QFont()

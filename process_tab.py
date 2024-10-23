@@ -44,7 +44,7 @@ class Worker(QRunnable):
             self.signals.finished.emit()
 
 class ProcessRow(QWidget):
-    def __init__(self, feature_label, entity_type, id_type, file_path, selected_column, parent=None):
+    def __init__(self, feature_label, entity_type, id_type, file_path, selected_column, process_tab_ref, parent=None):
         super().__init__(parent)
 
         self.feature_label = feature_label
@@ -52,11 +52,12 @@ class ProcessRow(QWidget):
         self.id_type = id_type
         self.file_path = file_path
         self.selected_column = selected_column
+        self.process_tab_ref = process_tab_ref  # Reference to ProcessTab
 
         # Layout for the row
         self.layout = QVBoxLayout(self)
 
-        # Display feature label, entity type and file path
+        # Display feature label, entity type, and file path
         entity_layout = QHBoxLayout()
         feature_label_display = QLabel(f"Feature Label: {feature_label}")
         entity_label = QLabel(f"Entity Type: {entity_type}")
@@ -84,7 +85,7 @@ class ProcessRow(QWidget):
             "Gene": process_gene,
             "Transcript": process_transcript,
             "Protein": process_protein,
-            "Promoter": process_promoter,  
+            "Promoter": process_promoter,
             "Drug": process_drug,
             "Disease": process_disease,
             "Phenotype": process_phenotype,
@@ -92,11 +93,11 @@ class ProcessRow(QWidget):
 
         process_func = process_functions.get(self.entity_type)
         if process_func:
-            # Start the process in a separate thread
-            self.parentWidget().start_processing(self, process_func)
+            # Start the process using the reference to ProcessTab
+            self.process_tab_ref.start_processing(self, process_func)
         else:
             QMessageBox.critical(self, "Error", f"No processing function found for entity type: {self.entity_type}")
-
+    
 class ProcessTab(QWidget):
 
     show_dialog_signal = pyqtSignal(dict)
@@ -107,36 +108,71 @@ class ProcessTab(QWidget):
         self.phenotype_embeddings = phenotype_embeddings
         self.disease_embeddings = disease_embeddings
         self.drug_embeddings = drug_embeddings
-        self.layout = QVBoxLayout(self)
+
+        # Create a main layout for the tab
+        main_layout = QVBoxLayout(self)
+
+        # Create a QSplitter to divide the interface into two sections
+        splitter = QSplitter(Qt.Vertical)  # Vertical splitter for top and bottom
+
+        # Upper section for processing rows (add scroll area for multiple rows)
+        upper_widget = QWidget()
+        upper_layout = QVBoxLayout(upper_widget)
         self.process_rows = []
-        self.selected_entities = {}
 
-        # Connect the signal to the slot that shows the dialog
-        self.show_dialog_signal.connect(self.show_multi_dialog)
-
-        # Add loading label
-        self.loading_label = QLabel("Processing data...")
-        self.layout.addWidget(self.loading_label)
-        self.animation_chars = cycle(["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"])
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_loading_animation)
-        self.loading_label.hide()  # Initially hide the label
-
-        # Create a ProcessRow for each entry in read_info_list if it's provided
         if read_info_list:
             for feature_label, entity_type, id_type, file_path, selected_column in read_info_list:
-                row = ProcessRow(feature_label, entity_type, id_type, file_path, selected_column)
+                # Pass self (reference to ProcessTab) to each ProcessRow
+                row = ProcessRow(feature_label, entity_type, id_type, file_path, selected_column, process_tab_ref=self)
                 self.process_rows.append(row)
-                self.layout.addWidget(row)
+                upper_layout.addWidget(row)
+
+        # Add some spacing and stretch at the bottom of the upper section
+        upper_layout.addStretch()
+
+        # Scroll area for the upper section (in case there are many rows)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(upper_widget)
+
+        # Add scroll area to the upper part of the splitter
+        splitter.addWidget(scroll_area)
+
+        # Lower section for clinical data and cache path selection
+        lower_widget = QWidget()
+        lower_layout = QVBoxLayout(lower_widget)
+
+        # Add clinical data section
+        self.add_clinical_data_section(lower_layout)
 
         # Add cache path section
-        self.add_cache_path_section()
+        self.add_cache_path_section(lower_layout)
 
-        # Add some spacing at the bottom
-        self.layout.addStretch()
+        # Add some spacing at the bottom of the lower section
+        lower_layout.addStretch()
+
+        # Add lower widget to the splitter
+        splitter.addWidget(lower_widget)
+
+        # Adjust splitter size ratio
+        splitter.setSizes([500, 150])  # Set initial sizes for top and bottom sections
+
+        # Add the splitter to the main layout
+        main_layout.addWidget(splitter)
 
         # Create thread pool
         self.threadpool = QThreadPool()
+
+        # Add loading label to indicate when processing is in progress
+        self.loading_label = QLabel("Processing data...")  # Define the loading label
+        self.loading_label.setAlignment(Qt.AlignCenter)
+        self.loading_label.hide()  # Initially hide the label
+        main_layout.addWidget(self.loading_label)  # Add it to the main layout (central position)
+
+        # Create animation characters for the loading animation
+        self.animation_chars = cycle(["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"])
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_loading_animation)
 
     def update_loading_animation(self):
         """Update the loading label with the next animation character."""
@@ -144,10 +180,9 @@ class ProcessTab(QWidget):
         self.loading_label.setText(f"Processing data... {char}")
 
     def start_processing(self, row, process_func):
-        """Start processing data in the background."""
-        self.loading_label.show()  # Show the loading label
-        self.timer.start(100)  # Start the animation timer
-        
+        """Start processing data in the background (upper section)."""
+        self.show_loading_animation()  # Show the loading label
+
         # Check the entity type and pass the appropriate embeddings
         if row.entity_type == "Phenotype":
             embeddings = self.phenotype_embeddings
@@ -173,7 +208,7 @@ class ProcessTab(QWidget):
                 selection_callback=self.emit_show_dialog_signal
             )
         else:
-            # none matcher func
+            # Use normal processing function
             worker = Worker(
                 process_func,
                 row.entity_type,
@@ -184,65 +219,56 @@ class ProcessTab(QWidget):
             )
 
         worker.signals.finished.connect(self.on_processing_complete)
-        worker.signals.error.connect(self.on_processing_error)
+        worker.signals.error.connect(self.on_processing_error)  # Connect error handling
         self.threadpool.start(worker)
 
-    def emit_show_dialog_signal(self, all_topk_phenotypes, entity_type, id_type, file_path, selected_column, feature_label, phenotype):
-        """Emit signal to show dialog in the main thread."""
-        self.entity_type = entity_type
-        self.id_type = id_type
-        self.file_path = file_path
-        self.selected_column = selected_column
-        self.feature_label = feature_label
-        self.phenotype = phenotype
-
-        self.show_dialog_signal.emit(all_topk_phenotypes)
-
-    def show_multi_dialog(self, all_topk_entities):
-        """Display the multi-selection dialog in the main thread."""
-        print("Preparing to show multi-selection dialog for all entities.")
-
-        # Pop up a dialog for multi-selection
-        dialog = MultiEntitySelectionDialog(all_topk_entities)
-        if dialog.exec_() == QDialog.Accepted:
-            selected_entities = dialog.get_selected_entities()
-            if selected_entities:
-                self.selected_entities = selected_entities
-                print(f"User selections: {self.selected_entities}")
-                # Continue processing after selection
-                self.continue_processing_after_selection()
-        else:
-            print("No selections made")
-
-    def continue_processing_after_selection(self):
-        """Pass the selected entities back for further processing."""
-        process_entities_file(
-            self.entity_type,
-            self.id_type,
-            self.feature_label,
-            self.phenotype,
-            self.selected_column,
-            self.selected_entities
-        )
-
-        self.timer.stop()
-        self.loading_label.setText("Processing complete.")
-        QTimer.singleShot(2000, self.loading_label.hide)
+    def show_loading_animation(self):
+        """Show and start the loading animation."""
+        self.loading_label.show()
+        self.timer.start(100)
 
     def on_processing_complete(self):
         """Handle processing completion."""
-        self.timer.stop()  # Stop the animation timer
+        self.timer.stop()
         self.loading_label.setText("Processing complete.")
         QTimer.singleShot(2000, self.loading_label.hide)  # Hide after 2 seconds
 
     def on_processing_error(self, error):
         """Handle processing error."""
-        self.timer.stop()  # Stop the animation timer
+        self.timer.stop()
         exctype, value, traceback_str = error
         QMessageBox.critical(self, "Error", f"An error occurred: {value}\n{traceback_str}")
         self.loading_label.hide()
 
-    def add_cache_path_section(self):
+    def add_clinical_data_section(self, layout):
+        """Add a section at the bottom for Clinical data and controls."""
+        clinical_layout = QVBoxLayout()
+
+        # Clinical data label
+        clinical_label = QLabel("Clinical data:")
+        clinical_layout.addWidget(clinical_label)
+
+        # Create the horizontal layout for the input and buttons
+        clinical_data_path_layout = QHBoxLayout()
+
+        # Data input field
+        self.clinical_data_path_input = QLineEdit("./test_data/clinical_data.csv")
+        
+        # Browse button
+        self.browse_button = QPushButton("Browse")
+        self.browse_button.clicked.connect(self.browse_clinical_data_path)
+
+        # Add input field and browse button to the horizontal layout
+        clinical_data_path_layout.addWidget(self.clinical_data_path_input)
+        clinical_data_path_layout.addWidget(self.browse_button)
+
+        # Add the horizontal layout to the vertical layout
+        clinical_layout.addLayout(clinical_data_path_layout)
+
+        # Add the clinical layout to the passed layout
+        layout.addLayout(clinical_layout)
+
+    def add_cache_path_section(self, layout):
         """Add a section at the bottom for Cache path and controls."""
         cache_layout = QVBoxLayout()
 
@@ -251,30 +277,30 @@ class ProcessTab(QWidget):
         cache_layout.addWidget(cache_label)
 
         # Create the horizontal layout for the input and buttons
-        path_layout = QHBoxLayout()
+        cache_path_layout = QHBoxLayout()
 
         # Path input field
         self.cache_path_input = QLineEdit("./cache")  # Default to ./cache
-        path_layout.addWidget(self.cache_path_input)
+        cache_path_layout.addWidget(self.cache_path_input)
 
         # Browse button
         self.browse_button = QPushButton("Browse")
         self.browse_button.clicked.connect(self.browse_cache_path)
-        path_layout.addWidget(self.browse_button)
+        cache_path_layout.addWidget(self.browse_button)
 
         # Process all button
         self.process_all_button = QPushButton("Process All")
         self.process_all_button.clicked.connect(self.process_all_data)
-        path_layout.addWidget(self.process_all_button)
+        cache_path_layout.addWidget(self.process_all_button)
 
         # Add the path layout to the cache layout
-        cache_layout.addLayout(path_layout)
+        cache_layout.addLayout(cache_path_layout)
 
         # Add some spacing at the bottom
         cache_layout.addStretch()
 
-        # Add the cache layout to the main layout
-        self.layout.addLayout(cache_layout)
+        # Add the cache layout to the passed layout
+        layout.addLayout(cache_layout)
 
     def browse_cache_path(self):
         """Open a file dialog to select the cache directory."""
@@ -282,15 +308,29 @@ class ProcessTab(QWidget):
         if directory:
             self.cache_path_input.setText(directory)
 
+    def browse_clinical_data_path(self):
+        """Open a file dialog to select a CSV file."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Select Clinical Data File", 
+            "./", 
+            "CSV Files (*.csv)"  # Filter to show only .csv files
+        )
+        if file_path:
+            self.clinical_data_path_input.setText(file_path)
+
     def process_all_data(self):
         """Handle processing all data from the cache path in a separate thread."""
-        cache_path = self.cache_path_input.text()
-        
-        # Start the process in a separate thread
-        worker = Worker(process_all_data, cache_path)
+        cache_path = self.cache_path_input.text()  # Get the cache path from input field
+        clinical_data_path = self.clinical_data_path_input.text()  # Get the clinical data path from input field
+
+        # Start the process in a separate thread and pass both cache_path and clinical_data_path
+        worker = Worker(process_and_merge_data, cache_path, clinical_data_path)
         worker.signals.finished.connect(self.on_processing_complete)
         worker.signals.error.connect(self.on_processing_error)
         self.threadpool.start(worker)
+
+
 
 class MultiEntitySelectionDialog(QDialog):
     def __init__(self, all_topk_entities, parent=None):
@@ -316,7 +356,7 @@ class MultiEntitySelectionDialog(QDialog):
 
         # Set column widths
         self.table_widget.setColumnWidth(0, 300)
-        self.table_widget.setColumnWidth(1, 400)
+        self.table_widget.setColumnWidth(1, 500)
 
         # Populate the table with entity options
         for row_idx, (entity_value, topk_entities) in enumerate(all_topk_entities.items()):
