@@ -53,7 +53,7 @@ class MedGraphica(QMainWindow):
         # Set main window properties
         self.setWindowTitle("MedGraphica")
         self.setWindowIcon(QIcon("assets/icons/logo.png"))
-        self.resize(2000, 800)
+        self.resize(2000, 900)
 
         # Center the window on the screen
         qr = self.frameGeometry()
