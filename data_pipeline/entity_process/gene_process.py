@@ -8,7 +8,7 @@ def process_gene(entity_type, id_type, file_path, selected_column, feature_label
     print(f"Processing Gene: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}, Feature Label: {feature_label}")
     
     # Load the gene entity data
-    gene_entity_data = pd.read_csv('data/BioMedGraphica/Node/Gene/biomedgraphica_gene.csv')    
+    gene_entity_data = pd.read_csv('resources/database/BioMedGraphica/Node/Gene/biomedgraphica_gene.csv')    
         
     # Determine the separator based on the file extension
     if file_path.endswith('.txt') or file_path.endswith('.tsv'):
@@ -21,6 +21,7 @@ def process_gene(entity_type, id_type, file_path, selected_column, feature_label
     def process_gene_expression(gene_entity_data):
         """Process Gene Expression data."""
         print(f"Processing Gene Expression for {entity_type} with Feature Label: {feature_label}")
+        print("Not implemented yet. Use transcriptomics entity instead.")
 
     def process_gene_cnv(gene_entity_data):
         """Process Gene CNV data, map Sample_ID to MedGraphica_ID, and export mapping."""
@@ -50,7 +51,7 @@ def process_gene(entity_type, id_type, file_path, selected_column, feature_label
         mapping_table = mapping_table.rename(columns={id_type: 'Original_ID'})
     
         # Save the mapping table to a separate CSV file
-        map_output_file = f'cache/id_mapping/{feature_label.lower()}_id_map.csv'
+        map_output_file = f'cache/raw_id_mapping/{feature_label.lower()}_id_map.csv'
         mapping_table.to_csv(map_output_file, sep=",", index=False)
         print(f"mapping saved to {map_output_file}")
 
@@ -80,10 +81,7 @@ def process_gene(entity_type, id_type, file_path, selected_column, feature_label
         cnv_final.to_csv(output_file_path, sep=",", index=False)
 
         print(f"CNV data processing completed. Output saved to {output_file_path}")
-            
 
-    
-    
     # Check if the feature_label contains "expression" or "cnv"
     if "expression" in feature_label.lower():
         process_gene_expression(gene_entity_data)

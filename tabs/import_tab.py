@@ -1,6 +1,7 @@
 # import_tab.py
 
 import os
+import pandas as pd
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
@@ -59,11 +60,11 @@ class UploadRow(QWidget):
         # Upload and clear buttons (also square)
         self.upload_button = QPushButton()
         self.upload_button.setFixedSize(30, 30)
-        self.upload_button.setIcon(QIcon("images/UI/upload.png"))
+        self.upload_button.setIcon(QIcon("assets/icons/upload.png"))
 
         self.clear_button = QPushButton()
         self.clear_button.setFixedSize(30, 30)
-        self.clear_button.setIcon(QIcon("images/UI/clear.png"))
+        self.clear_button.setIcon(QIcon("assets/icons/clear.png"))
     
         # Add widgets to the layout
         self.layout.addWidget(self.add_button)
@@ -104,7 +105,7 @@ class UploadRow(QWidget):
         options = QFileDialog.Options()
         
         # Set a default directory path (you can change this to any directory you prefer)
-        default_dir = f"E:/LabWork/MedGraphica_GUI/test_data"  # Default path, modify as needed
+        default_dir = f"./input_data"  # Default path, modify as needed
         
         file_path, _ = QFileDialog.getOpenFileName(
             self, 
@@ -137,49 +138,169 @@ class UploadRow(QWidget):
                 self.id_type.currentText(), 
                 self.path_display.text())
 
+    def set_file_info(self, feature_label, entity_type, id_type, file_path):
+        """Set feature label, entity type, id type, file path"""
+        self.feature_label.setText(feature_label)
+        self.entity_type.setCurrentText(entity_type)
+        self.id_type.setCurrentText(id_type)
+        self.path_display.setText(file_path)
+
 class ImportTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self.layout = QVBoxLayout(self)
-        self.upload_rows = []
+        # 主布局
+        self.main_layout = QVBoxLayout(self)
+        
+        # Config file label and buttons at the top
+        self.setup_config_controls()
 
-        # Initial 4 upload rows
-        for _ in range(2):
+        # 用来存储 upload rows 的容器布局
+        self.upload_rows = []
+        self.upload_rows_layout = QVBoxLayout()  # 用来放置上传行的布局
+
+        # Scroll area for upload rows
+        self.scroll_area = QScrollArea()
+        self.scroll_widget = QWidget()
+        self.scroll_widget.setLayout(self.upload_rows_layout)
+        self.scroll_area.setWidget(self.scroll_widget)
+        self.scroll_area.setWidgetResizable(True)
+
+        # Add the scroll area to the main layout
+        self.main_layout.addWidget(self.scroll_area)
+
+        # Initial N upload rows
+        for _ in range(4):
             self.add_row()
+
+    def setup_config_controls(self):
+        """Setup config file label and buttons at the top of the layout."""
+        # Config file label layout
+        config_label_layout = QHBoxLayout()
+        config_label = QLabel("Config File:")
+
+        # Set a smaller font for the label
+        small_font = QFont()
+        small_font.setPointSize(12)
+        config_label.setFont(small_font)
+
+        config_label.setFixedSize(150, 40)
+        config_label_layout.addWidget(config_label)
+        config_label_layout.addStretch()
+
+        # Config buttons layout (smaller buttons)
+        config_buttons_layout = QHBoxLayout()
+        self.import_button = QPushButton("Import")
+        self.import_button.setFixedSize(100, 40)
+        self.import_button.setFont(small_font)
+        self.import_button.clicked.connect(self.import_config_file)
+
+        self.export_button = QPushButton("Export")
+        self.export_button.setFixedSize(100, 40)
+        self.export_button.setFont(small_font)
+        self.export_button.clicked.connect(self.export_config_file)
+
+        config_buttons_layout.addWidget(self.import_button)
+        config_buttons_layout.addWidget(self.export_button)
+        config_buttons_layout.addStretch()  # Ensure buttons are left-aligned
+
+        # 把label和buttons都加入到main_layout顶部
+        self.main_layout.addLayout(config_label_layout)
+        self.main_layout.addLayout(config_buttons_layout)
 
     def add_row(self, after_row=None):
         """Add a new row to the upload area"""
         row = UploadRow(self, remove_callback=self.remove_row, insert_callback=self.add_row)
+
+        # 插入新的 row 到当前行下方
         if after_row:
-            # Insert the row after the specified row
             index = self.upload_rows.index(after_row) + 1
             self.upload_rows.insert(index, row)
-            self.layout.insertWidget(index, row)
+            self.upload_rows_layout.insertWidget(index, row)  # 插入到上传行的布局中
         else:
-            # Add to the end if no specific row is mentioned
+            # 如果没有指定具体行，添加到末尾
             self.upload_rows.append(row)
-            self.layout.addWidget(row)
+            self.upload_rows_layout.addWidget(row)
 
     def remove_row(self, row):
         """Remove a row from the upload area"""
         if len(self.upload_rows) > 1:
             self.upload_rows.remove(row)
-            self.layout.removeWidget(row)
+            self.upload_rows_layout.removeWidget(row)
             row.deleteLater()
 
     def get_all_file_info(self):
         """Get file info from all rows, including feature label"""
         file_info_list = []
         for row in self.upload_rows:
-            feature_label, entity_type, id_type, file_path = row.get_file_info()  # Now unpack four values
+            feature_label, entity_type, id_type, file_path = row.get_file_info()
             if not feature_label:
                 return None, "Missing Omics Feature Label"
             if not entity_type:
                 return None, "Invalid Entity Type"
             if not id_type:
-                return None, "Invalid ID Type"  # Add check for ID Type
+                return None, "Invalid ID Type"
             if not file_path or not os.path.exists(file_path):
                 return None, "Invalid File Path"
-            file_info_list.append((feature_label, entity_type, id_type, file_path))  # Include feature label in the file info
+            file_info_list.append((feature_label, entity_type, id_type, file_path))
         return file_info_list, None
+
+    def set_all_file_info(self, file_info_list):
+        """Set file info into rows and adjust rows based on the list size"""
+        # Clear existing rows
+        for row in self.upload_rows:
+            self.upload_rows_layout.removeWidget(row)
+            row.deleteLater()
+        self.upload_rows.clear()
+
+        # Add new rows based on file_info_list
+        for file_info in file_info_list:
+            self.add_row()  # Add a new row
+            self.upload_rows[-1].set_file_info(*file_info)  # Set file info for the last row
+
+    def import_config_file(self):
+        """Import a CSV config file and populate the fields"""
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Import Config File", 
+            "", 
+            "CSV Files (*.csv);;All Files (*)", 
+            options=options
+        )
+        if file_path:
+            # Read the CSV and populate the rows
+            try:
+                df = pd.read_csv(file_path)
+                if set(['Feature Label', 'Entity Type', 'ID Type', 'File Path']).issubset(df.columns):
+                    file_info_list = df[['Feature Label', 'Entity Type', 'ID Type', 'File Path']].values.tolist()
+                    self.set_all_file_info(file_info_list)
+                    print(f"Config file '{file_path}' imported successfully.")
+                else:
+                    print("CSV file does not have the required columns.")
+            except Exception as e:
+                print(f"Failed to import config file: {e}")
+
+    def export_config_file(self):
+        """Export the current form to a CSV config file"""
+        file_info_list, error = self.get_all_file_info()
+        if error:
+            print(f"Error: {error}")
+            return
+
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Export Config File", 
+            "Config.csv", 
+            "CSV Files (*.csv);;All Files (*)", 
+            options=options
+        )
+        if file_path:
+            # Export the file_info_list to CSV
+            try:
+                df = pd.DataFrame(file_info_list, columns=['Feature Label', 'Entity Type', 'ID Type', 'File Path'])
+                df.to_csv(file_path, index=False)
+                print(f"Config file '{file_path}' exported successfully.")
+            except Exception as e:
+                print(f"Failed to export config file: {e}")
