@@ -76,7 +76,7 @@ def process_entities_file(entity_type, id_type, feature_label, data_frame, selec
     mapping_df = pd.DataFrame(mapping, columns=['Original_Column', 'BioMedGraphica_ID', 'Mapped_Term'])
 
     # Save the mapping table to a separate CSV file
-    map_output_file = f'cache/id_mapping/{feature_label.lower()}_id_map.csv'
+    map_output_file = f'cache/raw_id_mapping/{feature_label.lower()}_id_map.csv'
     mapping_df.to_csv(map_output_file, sep=",", index=False)
     print(f"Mapping table saved to {map_output_file}")
 

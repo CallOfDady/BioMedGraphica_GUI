@@ -8,7 +8,7 @@ def process_promoter(entity_type, id_type, file_path, selected_column, feature_l
     print(f"Processing Gene: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}, Feature Label: {feature_label}")
     
     # Load the gene entity data
-    promoter_entity_data = pd.read_csv('data/BioMedGraphica/Node/Promoter/biomedgraphica_promoter.csv')    
+    promoter_entity_data = pd.read_csv('resources/database/BioMedGraphica/Node/Promoter/biomedgraphica_promoter.csv')    
         
     # Determine the separator based on the file extension
     if file_path.endswith('.txt') or file_path.endswith('.tsv'):
@@ -46,7 +46,7 @@ def process_promoter(entity_type, id_type, file_path, selected_column, feature_l
         mapping_table = mapping_table.rename(columns={id_type: 'Original_ID'})
 
         # Save the mapping table to a separate CSV file
-        map_output_file = f'cache/id_mapping/{feature_label.lower()}_id_map.csv'
+        map_output_file = f'cache/raw_id_mapping/{feature_label.lower()}_id_map.csv'
         mapping_table.to_csv(map_output_file, sep=",", index=False)
         print(f"Mapping saved to {map_output_file}")
 

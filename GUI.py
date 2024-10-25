@@ -1,13 +1,16 @@
+# GUI.py
+
 import sys
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from itertools import cycle
-from import_tab import ImportTab
-from read_tab import ReadTab, read_file
-from process_tab import ProcessTab
+from tabs.import_tab import ImportTab
+from tabs.read_tab import ReadTab, read_file
+from tabs.process_tab import ProcessTab
+from tabs.export_tab import ExportTab
 import traceback
-from entity_process.soft_match.entity_match import EntityMatcher
+from data_pipeline.entity_process.soft_match.entity_match import EntityMatcher
 import time
 import os
 
@@ -49,8 +52,8 @@ class MedGraphica(QMainWindow):
 
         # Set main window properties
         self.setWindowTitle("MedGraphica")
-        self.setWindowIcon(QIcon("images/UI/logo.png"))
-        self.resize(2000, 800)  # Initial window size
+        self.setWindowIcon(QIcon("assets/icons/logo.png"))
+        self.resize(2000, 800)
 
         # Center the window on the screen
         qr = self.frameGeometry()
@@ -67,39 +70,31 @@ class MedGraphica(QMainWindow):
         self.tab_widget = QTabWidget(self)
         self.main_layout.addWidget(self.tab_widget)
 
-        # Create tabs
+        # Create tabs with initial content
         self.import_tab = ImportTab()
-        self.read_tab = None
-        self.process_tab = ProcessTab([])  # Initialize ProcessTab with empty data
-        self.export_tab = QWidget()
+        self.read_tab = self.create_default_read_tab()  # Start with a default ReadTab
+        self.process_tab = ProcessTab([])  # Empty data initialization for ProcessTab
+        self.export_tab = ExportTab()
 
         # Add tabs to the tab widget
         self.tab_widget.addTab(self.import_tab, "Import")
-        self.tab_widget.addTab(QWidget(), "Read")
-        self.tab_widget.addTab(self.process_tab, "Process")  # Allow direct access to ProcessTab
+        self.tab_widget.addTab(self.read_tab, "Read")
+        self.tab_widget.addTab(self.process_tab, "Process")
         self.tab_widget.addTab(self.export_tab, "Export")
-
-        # Create layouts for export tab (currently empty)
-        self.export_layout = QVBoxLayout(self.export_tab)
 
         # Create the bottom button area
         self.button_layout = QHBoxLayout()
         self.main_layout.addLayout(self.button_layout)
 
-        # Create the Previous, Next, and Finish buttons
+        # Create navigation buttons
         self.previous_button = QPushButton("Previous")
         self.next_button = QPushButton("Next")
-        self.finish_button = QPushButton("Finish")
-
-        # Add buttons to the button layout
         self.button_layout.addWidget(self.previous_button)
         self.button_layout.addWidget(self.next_button)
-        self.button_layout.addWidget(self.finish_button)
 
         # Connect button signals to slots
         self.previous_button.clicked.connect(self.go_to_previous_tab)
         self.next_button.clicked.connect(self.go_to_next_tab)
-        self.finish_button.clicked.connect(self.finish_read)
 
         # Initialize button states
         self.update_buttons()
@@ -107,6 +102,14 @@ class MedGraphica(QMainWindow):
         # Thread pool
         self.threadpool = QThreadPool()
         print(f"Multithreading with maximum {self.threadpool.maxThreadCount()} threads")
+
+    def create_default_read_tab(self):
+        """Create the ReadTab with a default message if no files are uploaded."""
+        default_read_tab = QWidget()
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("No files uploaded. Please return to Import Tab and upload files to proceed."))
+        default_read_tab.setLayout(layout)
+        return default_read_tab
 
     def go_to_previous_tab(self):
         """Go to the previous tab"""
@@ -118,27 +121,26 @@ class MedGraphica(QMainWindow):
     def go_to_next_tab(self):
         """Go to the next tab based on the current tab"""
         current_index = self.tab_widget.currentIndex()
-
         print(f"Current Tab Index: {current_index}")  # Debug info
 
         if current_index == 0:
+            # Handle Import tab logic
             worker = Worker(self.handle_import_next)
-            worker.signals.result.connect(self.update_read_tab_data)  # Connect to update_read_tab_data slot
+            worker.signals.result.connect(self.update_read_tab_data)
         elif current_index == 1:
-            worker = Worker(self.handle_read_next)
-            worker.signals.result.connect(self.update_process_tab_data)  # Connect to update_process_tab_data slot
+            # Handle Read tab logic
+            if isinstance(self.read_tab, ReadTab):  # Only proceed if ReadTab has data
+                worker = Worker(self.handle_read_next)
+                worker.signals.result.connect(self.update_process_tab_data)
+            else:
+                QMessageBox.warning(self, "No Data", "Please return to Import Tab and upload files to proceed.")
+                return  # Prevent advancing if no data is loaded
         elif current_index == 2:
-            if self.process_tab is None:
-                self.process_tab = ProcessTab([])  # Initialize ProcessTab with empty data if not created
-                self.tab_widget.removeTab(2)
-                self.tab_widget.insertTab(2, self.process_tab, "Process")
-            # Allow to switch to ProcessTab even if previous steps are not completed
-            self.tab_widget.setCurrentIndex(2)
-            self.update_buttons()
-            return  # Exit here, as no further threading is required
-        else:
+            # ProcessTab to ExportTab transition
             worker = Worker(self.handle_process_next)
-            worker.signals.result.connect(self.update_export_tab)  # Connect to update_export_tab slot
+            worker.signals.result.connect(self.update_export_tab)
+        else:
+            return
 
         worker.signals.finished.connect(self.on_thread_complete)
         worker.signals.error.connect(self.on_thread_error)
@@ -167,17 +169,23 @@ class MedGraphica(QMainWindow):
         return file_info_list
 
     def update_read_tab_data(self, file_info_list):
-        """Update the Read tab data by creating ReadTab in the main thread"""
-        self.read_tab = ReadTab(file_info_list)
-        self.tab_widget.removeTab(1)
-        self.tab_widget.insertTab(1, self.read_tab, "Read")
-        print(f"Total files uploaded: {len(file_info_list)}")
-        print("File Info:", file_info_list)
-        # Start reading files and extracting columns in the background
-        for i, (feature_label, entity_type, id_type, file_path) in enumerate(file_info_list):
-            worker = Worker(self.read_file_columns, file_path, id_type)
-            worker.signals.result.connect(lambda columns, index=i: self.update_read_tab_columns(index, columns))
-            self.threadpool.start(worker)
+        """Update the Read tab data by creating a ReadTab in the main thread when data is provided."""
+        if file_info_list:
+            # Replace the current ReadTab with a new instance, enabling file reading functionality
+            self.read_tab = ReadTab(file_info_list)
+            self.tab_widget.removeTab(1)
+            self.tab_widget.insertTab(1, self.read_tab, "Read")
+
+            # Start reading files and extracting columns in the background
+            for i, (feature_label, entity_type, id_type, file_path) in enumerate(file_info_list):
+                worker = Worker(self.read_file_columns, file_path, id_type)
+                worker.signals.result.connect(lambda columns, index=i: self.update_read_tab_columns(index, columns))
+                self.threadpool.start(worker)
+        else:
+            # Reset to default message if no files were uploaded
+            self.read_tab = self.create_default_read_tab()
+            self.tab_widget.removeTab(1)
+            self.tab_widget.insertTab(1, self.read_tab, "Read")
 
     def read_file_columns(self, file_path, id_type, **kwargs):
         """Read the file and extract columns based on id_type"""
@@ -208,18 +216,19 @@ class MedGraphica(QMainWindow):
     
     def handle_process_next(self):
         """Handle the Next button in the Process tab"""
-        print("Processing the data...")
-        # Get the process info in the background thread
-        process_info = self.process_tab.get_process_info()
-        return process_info
+        print("Finished processing the data, switching to export tab...")
+        # # Get the process info in the background thread
+        # process_info = self.process_tab.get_read_info()
+        # return process_info
 
     def update_export_tab(self, process_info):
-        """Handle the Next button in the Export tab"""
+        """Update the Export tab content based on the data from ProcessTab"""
         print("Preparing to export the data...")
-        # Placeholder for export logic
-        print("Process Info:", process_info)
+        self.export_tab = ExportTab()
+        self.tab_widget.removeTab(3)
+        self.tab_widget.insertTab(3, self.export_tab, "Export")
 
-    def finish_read(self):
+    def exit_program(self):
         """Finish the read and close the application"""
         self.close()
 
@@ -228,21 +237,28 @@ class MedGraphica(QMainWindow):
         current_index = self.tab_widget.currentIndex()
         self.previous_button.setEnabled(current_index > 0)
         
-        # Allow "Next" to disappear only on the last tab (export tab)
-        self.next_button.setVisible(current_index < self.tab_widget.count() - 1)
-        self.finish_button.setVisible(current_index == self.tab_widget.count() - 1)
+        # Check if the current tab is the last tab
+        if current_index == self.tab_widget.count() - 1:
+            self.next_button.setText("Exit")
+            self.next_button.clicked.disconnect() 
+            self.next_button.clicked.connect(self.exit_program)
+        else:
+            self.next_button.setText("Next")
+            self.next_button.clicked.disconnect()
+            self.next_button.clicked.connect(self.go_to_next_tab)
 
 class LoadingDialog(QDialog):
     def __init__(self, message, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Loading...")
+        self.setWindowTitle("Initializing")
         self.setModal(True)
 
         layout = QVBoxLayout(self)
         label = QLabel(message)
         layout.addWidget(label)
+        self.setWindowIcon(QIcon("assets/icons/logo.png"))
 
-        self.setFixedSize(600, 200)
+        self.setFixedSize(600, 300)
 
         self.loading_label = QLabel()
         layout.addWidget(self.loading_label)
@@ -260,30 +276,30 @@ def load_models():
     """Function to load models and embeddings"""
     matcher = EntityMatcher(model_path='dmis-lab/biobert-v1.1', device='cuda')
     matcher.load_model()
-    disease_embeddings = matcher.load_embeddings("entity_process/soft_match/disease_embeddings.pt")
-    phenotype_embeddings = matcher.load_embeddings("entity_process/soft_match/phenotype_embeddings.pt")
-    drug_embeddings = matcher.load_embeddings("entity_process/soft_match/drug_embeddings.pt")
+    disease_embeddings = matcher.load_embeddings("./resources/embeddings/disease_embeddings.pt")
+    phenotype_embeddings = matcher.load_embeddings("./resources/embeddings/phenotype_embeddings.pt")
+    drug_embeddings = matcher.load_embeddings("./resources/embeddings/drug_embeddings.pt")
     return matcher, phenotype_embeddings, disease_embeddings, drug_embeddings
 
-# Function to ensure necessary directories exist
 def ensure_directories_exist():
-    # Define the paths for the directories
-    cache_dir = ".cache"
-    id_mapping_dir = os.path.join("cache", "id_mapping")
+    # Define the paths for the directories in a list
+    directories = [
+        "./input_data",
+        "./cache",
+        "./cache/raw_id_mapping",
+        "./cache/processed_data",
+        "./resources",
+        "./resources/database",
+        "./resources/embeddings"
+    ]
 
-    # Check if .cache directory exists, if not, create it
-    if not os.path.exists(cache_dir):
-        os.makedirs(cache_dir)
-        print(f"Created directory: {cache_dir}")
-    else:
-        print(f"Directory already exists: {cache_dir}")
-
-    # Check if ./cache/id_mapping directory exists, if not, create it
-    if not os.path.exists(id_mapping_dir):
-        os.makedirs(id_mapping_dir)
-        print(f"Created directory: {id_mapping_dir}")
-    else:
-        print(f"Directory already exists: {id_mapping_dir}")
+    # Loop through each directory, create it if it doesn't exist
+    for directory in directories:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            print(f"Created directory: {directory}")
+        else:
+            print(f"Directory already exists: {directory}")
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
