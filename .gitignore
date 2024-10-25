@@ -1,0 +1,14 @@
+*.pyc
+*.pyc
+*.csv
+/archive
+*.pyc
+/cache
+data_pipeline/entity_process/soft_match/api call.ipynb
+/output
+/resources
+*.pyc
+__pycache__/
+/__pycache__
+__pycache__
+**/__pycache__/
