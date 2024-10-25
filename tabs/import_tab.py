@@ -149,15 +149,15 @@ class ImportTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # 主布局
+        # Main layout
         self.main_layout = QVBoxLayout(self)
         
         # Config file label and buttons at the top
         self.setup_config_controls()
 
-        # 用来存储 upload rows 的容器布局
+        # Upload rows
         self.upload_rows = []
-        self.upload_rows_layout = QVBoxLayout()  # 用来放置上传行的布局
+        self.upload_rows_layout = QVBoxLayout()
 
         # Scroll area for upload rows
         self.scroll_area = QScrollArea()
@@ -204,7 +204,7 @@ class ImportTab(QWidget):
         config_buttons_layout.addWidget(self.export_button)
         config_buttons_layout.addStretch()  # Ensure buttons are left-aligned
 
-        # 把label和buttons都加入到main_layout顶部
+        # Add the layouts to the main layout
         self.main_layout.addLayout(config_label_layout)
         self.main_layout.addLayout(config_buttons_layout)
 
@@ -212,13 +212,13 @@ class ImportTab(QWidget):
         """Add a new row to the upload area"""
         row = UploadRow(self, remove_callback=self.remove_row, insert_callback=self.add_row)
 
-        # 插入新的 row 到当前行下方
+        # Insert the row after the specified row
         if after_row:
             index = self.upload_rows.index(after_row) + 1
             self.upload_rows.insert(index, row)
-            self.upload_rows_layout.insertWidget(index, row)  # 插入到上传行的布局中
+            self.upload_rows_layout.insertWidget(index, row)  # Insert at the specified index
         else:
-            # 如果没有指定具体行，添加到末尾
+            # Append the row at the end
             self.upload_rows.append(row)
             self.upload_rows_layout.addWidget(row)
 
