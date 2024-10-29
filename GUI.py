@@ -1,24 +1,24 @@
-# GUI.py
-
 import sys
+import os
+import traceback
+from itertools import cycle
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
-from itertools import cycle
+from tabs.welcome_tab import WelcomeTab
 from tabs.import_tab import ImportTab
 from tabs.read_tab import ReadTab, read_file
 from tabs.process_tab import ProcessTab
 from tabs.export_tab import ExportTab
-import traceback
 from data_pipeline.entity_process.soft_match.entity_match import EntityMatcher
-import time
-import os
+
 
 class WorkerSignals(QObject):
     finished = pyqtSignal()
     error = pyqtSignal(tuple)
     result = pyqtSignal(object)
     progress = pyqtSignal(int)
+
 
 class Worker(QRunnable):
     def __init__(self, fn, *args, **kwargs):
@@ -32,7 +32,7 @@ class Worker(QRunnable):
     def run(self):
         try:
             result = self.fn(*self.args, **self.kwargs)
-        except:
+        except Exception:
             traceback.print_exc()
             exctype, value = sys.exc_info()[:2]
             self.signals.error.emit((exctype, value, traceback.format_exc()))
@@ -40,6 +40,7 @@ class Worker(QRunnable):
             self.signals.result.emit(result)
         finally:
             self.signals.finished.emit()
+
 
 class MedGraphica(QMainWindow):
     def __init__(self, matcher, phenotype_embeddings, disease_embeddings, drug_embeddings):
@@ -53,7 +54,7 @@ class MedGraphica(QMainWindow):
         # Set main window properties
         self.setWindowTitle("MedGraphica")
         self.setWindowIcon(QIcon("assets/icons/logo.png"))
-        self.resize(2000, 800)
+        self.resize(2000, 900)
 
         # Center the window on the screen
         qr = self.frameGeometry()
@@ -71,12 +72,14 @@ class MedGraphica(QMainWindow):
         self.main_layout.addWidget(self.tab_widget)
 
         # Create tabs with initial content
+        self.welcome_tab = WelcomeTab()
         self.import_tab = ImportTab()
-        self.read_tab = self.create_default_read_tab()  # Start with a default ReadTab
+        self.read_tab = self.create_default_read_tab()  # Default ReadTab message
         self.process_tab = ProcessTab([])  # Empty data initialization for ProcessTab
         self.export_tab = ExportTab()
 
         # Add tabs to the tab widget
+        self.tab_widget.addTab(self.welcome_tab, "Welcome")
         self.tab_widget.addTab(self.import_tab, "Import")
         self.tab_widget.addTab(self.read_tab, "Read")
         self.tab_widget.addTab(self.process_tab, "Process")
@@ -121,22 +124,20 @@ class MedGraphica(QMainWindow):
     def go_to_next_tab(self):
         """Go to the next tab based on the current tab"""
         current_index = self.tab_widget.currentIndex()
-        print(f"Current Tab Index: {current_index}")  # Debug info
-
         if current_index == 0:
-            # Handle Import tab logic
+            self.handle_welcome_next()
+            return 
+        elif current_index == 1:
             worker = Worker(self.handle_import_next)
             worker.signals.result.connect(self.update_read_tab_data)
-        elif current_index == 1:
-            # Handle Read tab logic
-            if isinstance(self.read_tab, ReadTab):  # Only proceed if ReadTab has data
+        elif current_index == 2:
+            if isinstance(self.read_tab, ReadTab):  
                 worker = Worker(self.handle_read_next)
                 worker.signals.result.connect(self.update_process_tab_data)
             else:
                 QMessageBox.warning(self, "No Data", "Please return to Import Tab and upload files to proceed.")
-                return  # Prevent advancing if no data is loaded
-        elif current_index == 2:
-            # ProcessTab to ExportTab transition
+                return  
+        elif current_index == 3:
             worker = Worker(self.handle_process_next)
             worker.signals.result.connect(self.update_export_tab)
         else:
@@ -152,42 +153,41 @@ class MedGraphica(QMainWindow):
         current_index = self.tab_widget.currentIndex()
         if current_index < self.tab_widget.count() - 1:
             self.tab_widget.setCurrentIndex(current_index + 1)
-            print(f"Switched to Tab Index: {self.tab_widget.currentIndex()}")  # Debug info
         self.update_buttons()
 
     def on_thread_error(self, error):
         exctype, value, traceback_str = error
         QMessageBox.critical(self, "Error", f"An error occurred: {value}\n{traceback_str}")
 
+    def handle_welcome_next(self):
+        """Handle the Next button in the Welcome tab"""
+        self.tab_widget.setCurrentIndex(1)
+        self.update_buttons()
+
     def handle_import_next(self):
         """Handle the Next button in the Import tab"""
         file_info_list, error_message = self.import_tab.get_all_file_info()
         if error_message:
             raise Exception(error_message)
-        
-        # Return file_info_list, which will be used to create the ReadTab in the main thread
         return file_info_list
 
     def update_read_tab_data(self, file_info_list):
         """Update the Read tab data by creating a ReadTab in the main thread when data is provided."""
         if file_info_list:
-            # Replace the current ReadTab with a new instance, enabling file reading functionality
             self.read_tab = ReadTab(file_info_list)
-            self.tab_widget.removeTab(1)
-            self.tab_widget.insertTab(1, self.read_tab, "Read")
+            self.tab_widget.removeTab(2)
+            self.tab_widget.insertTab(2, self.read_tab, "Read")
 
-            # Start reading files and extracting columns in the background
             for i, (feature_label, entity_type, id_type, file_path) in enumerate(file_info_list):
                 worker = Worker(self.read_file_columns, file_path, id_type)
                 worker.signals.result.connect(lambda columns, index=i: self.update_read_tab_columns(index, columns))
                 self.threadpool.start(worker)
         else:
-            # Reset to default message if no files were uploaded
             self.read_tab = self.create_default_read_tab()
-            self.tab_widget.removeTab(1)
-            self.tab_widget.insertTab(1, self.read_tab, "Read")
+            self.tab_widget.removeTab(2)
+            self.tab_widget.insertTab(2, self.read_tab, "Read")
 
-    def read_file_columns(self, file_path, id_type, **kwargs):
+    def read_file_columns(self, file_path, id_type):
         """Read the file and extract columns based on id_type"""
         return read_file(file_path, id_type)
 
@@ -197,36 +197,27 @@ class MedGraphica(QMainWindow):
 
     def handle_read_next(self):
         """Handle the Next button in the Read tab"""
-        print("Reading the data...")
         read_info = self.read_tab.get_read_info()
-        print(f"Selected Columns: {read_info}")
-        
-        # Return read_info, which will be used to create the ProcessTab in the main thread
         return read_info
     
     def update_process_tab_data(self, read_info):
         """Update the Process tab data by creating ProcessTab in the main thread"""
-        # Delay the creation of ProcessTab to minimize GUI update time
         self.process_tab = ProcessTab(read_info, matcher=self.matcher,
                                     phenotype_embeddings=self.phenotype_embeddings, 
                                     disease_embeddings=self.disease_embeddings, 
                                     drug_embeddings=self.drug_embeddings)
-        self.tab_widget.removeTab(2)
-        self.tab_widget.insertTab(2, self.process_tab, "Process")
+        self.tab_widget.removeTab(3)
+        self.tab_widget.insertTab(3, self.process_tab, "Process")
     
     def handle_process_next(self):
         """Handle the Next button in the Process tab"""
         print("Finished processing the data, switching to export tab...")
-        # # Get the process info in the background thread
-        # process_info = self.process_tab.get_read_info()
-        # return process_info
 
     def update_export_tab(self, process_info):
         """Update the Export tab content based on the data from ProcessTab"""
-        print("Preparing to export the data...")
         self.export_tab = ExportTab()
-        self.tab_widget.removeTab(3)
-        self.tab_widget.insertTab(3, self.export_tab, "Export")
+        self.tab_widget.removeTab(4)
+        self.tab_widget.insertTab(4, self.export_tab, "Export")
 
     def exit_program(self):
         """Finish the read and close the application"""
@@ -237,7 +228,6 @@ class MedGraphica(QMainWindow):
         current_index = self.tab_widget.currentIndex()
         self.previous_button.setEnabled(current_index > 0)
         
-        # Check if the current tab is the last tab
         if current_index == self.tab_widget.count() - 1:
             self.next_button.setText("Exit")
             self.next_button.clicked.disconnect() 
@@ -246,6 +236,7 @@ class MedGraphica(QMainWindow):
             self.next_button.setText("Next")
             self.next_button.clicked.disconnect()
             self.next_button.clicked.connect(self.go_to_next_tab)
+
 
 class LoadingDialog(QDialog):
     def __init__(self, message, parent=None):
@@ -257,7 +248,6 @@ class LoadingDialog(QDialog):
         label = QLabel(message)
         layout.addWidget(label)
         self.setWindowIcon(QIcon("assets/icons/logo.png"))
-
         self.setFixedSize(600, 300)
 
         self.loading_label = QLabel()
@@ -266,14 +256,14 @@ class LoadingDialog(QDialog):
         self.animation_chars = cycle(["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"])
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_loading_animation)
-        self.timer.start(100)  # Update every 100ms
+        self.timer.start(100)
 
     def update_loading_animation(self):
         char = next(self.animation_chars)
         self.loading_label.setText(f"Loading... {char}")
 
+
 def load_models():
-    """Function to load models and embeddings"""
     matcher = EntityMatcher(model_path='dmis-lab/biobert-v1.1', device='cuda')
     matcher.load_model()
     disease_embeddings = matcher.load_embeddings("./resources/embeddings/disease_embeddings.pt")
@@ -281,8 +271,8 @@ def load_models():
     drug_embeddings = matcher.load_embeddings("./resources/embeddings/drug_embeddings.pt")
     return matcher, phenotype_embeddings, disease_embeddings, drug_embeddings
 
+
 def ensure_directories_exist():
-    # Define the paths for the directories in a list
     directories = [
         "./input_data",
         "./cache",
@@ -293,7 +283,6 @@ def ensure_directories_exist():
         "./resources/embeddings"
     ]
 
-    # Loop through each directory, create it if it doesn't exist
     for directory in directories:
         if not os.path.exists(directory):
             os.makedirs(directory)
@@ -301,47 +290,35 @@ def ensure_directories_exist():
         else:
             print(f"Directory already exists: {directory}")
 
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-
-    # Ensure the necessary directories exist
     ensure_directories_exist()
 
-    # Set font properties
     font = QFont()
     font.setPointSize(14)
     app.setFont(font)
 
-    # Create loading dialog
     loading_dialog = LoadingDialog("Loading BioBERT model, please wait...")
     loading_dialog.show()
 
-    # Define a worker to load models and embeddings
     def on_load_complete(result):
-        print("Model loading complete. Preparing to show main window...")
         matcher, phenotype_embeddings, disease_embeddings, drug_embeddings = result
-
-        global window  # Make window a global variable to prevent it from being garbage collected
+        global window
         window = MedGraphica(matcher, phenotype_embeddings, disease_embeddings, drug_embeddings)
         window.show()
         loading_dialog.close()
 
-    def start_main_window(matcher, phenotype_embeddings, disease_embeddings, drug_embeddings):
-        window = MedGraphica(matcher, phenotype_embeddings, disease_embeddings, drug_embeddings)
-        window.show()
-
     def on_load_error(error):
         exctype, value, traceback_str = error
-        print(f"Error occurred during model loading: {value}\n{traceback_str}")  # Debug print
+        print(f"Error during model loading: {value}\n{traceback_str}")
         loading_dialog.close()
         QMessageBox.critical(None, "Error", f"Failed to load model: {value}\n{traceback_str}")
         sys.exit(1)
     
-    # Load models in the background
     worker = Worker(load_models)
     worker.signals.result.connect(on_load_complete)
     worker.signals.error.connect(on_load_error)
 
-    # Start the worker
     QThreadPool.globalInstance().start(worker)
     sys.exit(app.exec_())
