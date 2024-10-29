@@ -5,3 +5,4 @@
 data_pipeline/entity_process/soft_match/api call.ipynb
 /output
 *.pt
+config.py
