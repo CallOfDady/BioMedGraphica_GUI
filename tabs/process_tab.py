@@ -1,11 +1,13 @@
-# process_tab.py
-
+import os
+import sys
+import traceback
+import shutil
+import pandas as pd
+from itertools import cycle
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
-from itertools import cycle
 from data_pipeline.data_process import *
-
 from data_pipeline.entity_process.gene_process import *
 from data_pipeline.entity_process.transcript_process import *
 from data_pipeline.entity_process.protein_process import *
@@ -15,10 +17,11 @@ from data_pipeline.entity_process.disease_process import *
 from data_pipeline.entity_process.phenotype_process import *
 from data_pipeline.entity_process.soft_match_process import *
 
-import os
-import sys
-import traceback
-import shutil
+try:
+    from config import database_path
+except ImportError:
+    database_path = None
+    print("Warning: database_path not found in config.py.")
 
 class WorkerSignals(QObject):
     finished = pyqtSignal()
@@ -48,7 +51,6 @@ class Worker(QRunnable):
 class ProcessRow(QWidget):
     def __init__(self, feature_label, entity_type, id_type, file_path, selected_column, process_tab_ref, parent=None):
         super().__init__(parent)
-
         self.feature_label = feature_label
         self.entity_type = entity_type
         self.id_type = id_type
@@ -95,13 +97,12 @@ class ProcessRow(QWidget):
 
         process_func = process_functions.get(self.entity_type)
         if process_func:
-            # Start the process using the reference to ProcessTab
+            # Start the process, passing the database_path
             self.process_tab_ref.start_processing(self, process_func)
         else:
             QMessageBox.critical(self, "Error", f"No processing function found for entity type: {self.entity_type}")
     
 class ProcessTab(QWidget):
-
     show_dialog_signal = pyqtSignal(dict)
 
     def __init__(self, read_info_list=None, matcher=None, phenotype_embeddings=None, disease_embeddings=None, drug_embeddings=None, parent=None):
@@ -110,91 +111,27 @@ class ProcessTab(QWidget):
         self.phenotype_embeddings = phenotype_embeddings
         self.disease_embeddings = disease_embeddings
         self.drug_embeddings = drug_embeddings
-
         self.process_rows = []
         self.selected_entities = {}
-
         self.file_order = []
 
+        # Set database path from config import
+        self.database_path = database_path
+        if not self.database_path:
+            QMessageBox.warning(self, "Warning", "Database path is not set in config.py.")
+        
         # Connect the signal to the slot that shows the dialog
         self.show_dialog_signal.connect(self.show_multi_dialog)
 
-        # Create a main layout for the tab
+        # Create main layout for the tab
         main_layout = QVBoxLayout(self)
 
-        # Create a QSplitter to divide the interface into two sections
-        splitter = QSplitter(Qt.Vertical)  # Vertical splitter for top and bottom
-
-        # Upper section for processing rows (add scroll area for multiple rows)
-        upper_widget = QWidget()
-        upper_layout = QVBoxLayout(upper_widget)
-        self.process_rows = []
-
-        # Create a horizontal layout to hold the Clear Cache button and the process rows
-        upper_control_layout = QHBoxLayout()
-
-        # Add the Clear Cache button to the right
-        clear_cache_button = QPushButton("Clear Cache Folder")
-        clear_cache_button.setFixedSize(200, 30)  # Set the size of the button
-
-        # Set the smaller font for the button
-        small_font = QFont()
-        small_font.setPointSize(10)
-        clear_cache_button.setFont(small_font)
-
-        clear_cache_button.clicked.connect(self.clear_cache_folder)  # Connect the button to the function
-
-        upper_control_layout.addStretch()  # Add stretch to push the button to the right
-        upper_control_layout.addWidget(clear_cache_button)
-
-        upper_layout.addLayout(upper_control_layout)  # Add the control layout to the upper section
-
-        if read_info_list:
-            for feature_label, entity_type, id_type, file_path, selected_column in read_info_list:
-                row = ProcessRow(feature_label, entity_type, id_type, file_path, selected_column, process_tab_ref=self)
-                self.process_rows.append(row)
-                upper_layout.addWidget(row)
-
-        upper_layout.addStretch()
-
-        # Scroll area for the upper section (in case there are many rows)
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setWidget(upper_widget)
-
-        splitter.addWidget(scroll_area)
-
-        # Lower section for clinical data and cache path selection
-        lower_widget = QWidget()
-        lower_layout = QVBoxLayout(lower_widget)
-
-        # Add Entity Order Arrangement Button and Label
-        order_layout = QHBoxLayout()
-        self.entity_order_button = QPushButton("Entity Ordering")
-        self.entity_order_button.clicked.connect(self.open_entity_order_dialog)
-        self.entity_order_label = QLabel("No order selected")
-        order_layout.addWidget(self.entity_order_button)
-        order_layout.addWidget(self.entity_order_label)
-        lower_layout.addLayout(order_layout)
-
-        # Add clinical data section
-        self.add_clinical_data_section(lower_layout)
-
-        # Add cache path section
-        self.add_cache_path_section(lower_layout)
-
-        # Add some spacing at the bottom of the lower section
-        lower_layout.addStretch()
-
-        # Add lower widget to the splitter
-        splitter.addWidget(lower_widget)
-
-        splitter.setSizes([500, 150])  # Set initial sizes for top and bottom sections
-        main_layout.addWidget(splitter)
+        # Initialize UI
+        self.init_ui(main_layout, read_info_list)
 
         # Create thread pool
         self.threadpool = QThreadPool()
-
+        
         # Add loading label
         self.loading_label = QLabel("Processing data...")
         self.loading_label.setAlignment(Qt.AlignCenter)
@@ -205,6 +142,59 @@ class ProcessTab(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_loading_animation)
 
+    def init_ui(self, main_layout, read_info_list):
+        """Initialize the UI layout for the tab."""
+        splitter = QSplitter(Qt.Vertical)
+
+        # Upper section for processing rows
+        upper_widget = QWidget()
+        upper_layout = QVBoxLayout(upper_widget)
+
+        small_font = QFont()
+        small_font.setPointSize(10)
+
+        clear_cache_button = QPushButton("Clear Cache Folder")
+        clear_cache_button.setFont(small_font)
+        clear_cache_button.setFixedSize(200, 30)
+        clear_cache_button.clicked.connect(self.clear_cache_folder)
+        
+        upper_control_layout = QHBoxLayout()
+        upper_control_layout.addStretch()
+        upper_control_layout.addWidget(clear_cache_button)
+        upper_layout.addLayout(upper_control_layout)
+
+        if read_info_list:
+            for feature_label, entity_type, id_type, file_path, selected_column in read_info_list:
+                row = ProcessRow(feature_label, entity_type, id_type, file_path, selected_column, process_tab_ref=self)
+                self.process_rows.append(row)
+                upper_layout.addWidget(row)
+
+        upper_layout.addStretch()
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(upper_widget)
+        splitter.addWidget(scroll_area)
+
+        # Lower section for clinical data and cache path
+        lower_widget = QWidget()
+        lower_layout = QVBoxLayout(lower_widget)
+
+        order_layout = QHBoxLayout()
+        self.entity_order_button = QPushButton("Entity Ordering")
+        self.entity_order_button.clicked.connect(self.open_entity_order_dialog)
+        self.entity_order_label = QLabel("No order selected")
+        order_layout.addWidget(self.entity_order_button)
+        order_layout.addWidget(self.entity_order_label)
+        lower_layout.addLayout(order_layout)
+
+        self.add_clinical_data_section(lower_layout)
+        self.add_cache_path_section(lower_layout)
+        lower_layout.addStretch()
+        splitter.addWidget(lower_widget)
+        splitter.setSizes([500, 150])
+
+        main_layout.addWidget(splitter)
+
     def update_loading_animation(self):
         """Update the loading label with the next animation character."""
         char = next(self.animation_chars)
@@ -212,23 +202,19 @@ class ProcessTab(QWidget):
 
     def start_processing(self, row, process_func):
         """Start processing data in the background (upper section)."""
-        self.show_loading_animation()  # Show the loading label
+        self.show_loading_animation()
 
-        # Check the entity type and pass the appropriate embeddings
+        embeddings = None
         if row.entity_type == "Phenotype":
             embeddings = self.phenotype_embeddings
         elif row.entity_type == "Disease":
             embeddings = self.disease_embeddings
         elif row.entity_type == "Drug":
             embeddings = self.drug_embeddings
-        else:
-            embeddings = None  # Handle other cases if necessary
 
-        # Check if the id_type contains "name" to determine the process function
         if "name" in row.id_type.lower():
-            # If id_type contains "name", use process_entities_file
             worker = Worker(
-                process_entities,  # Call process_entities
+                process_entities,
                 row.entity_type,
                 row.id_type,
                 row.file_path,
@@ -239,46 +225,32 @@ class ProcessTab(QWidget):
                 selection_callback=self.emit_show_dialog_signal
             )
         else:
-            # Use normal processing function
             worker = Worker(
                 process_func,
                 row.entity_type,
                 row.id_type,
                 row.file_path,
                 row.selected_column,
-                row.feature_label
+                row.feature_label,
+                database_path=self.database_path
             )
 
         worker.signals.finished.connect(self.on_processing_complete)
-        worker.signals.error.connect(self.on_processing_error)  # Connect error handling
+        worker.signals.error.connect(self.on_processing_error)
         self.threadpool.start(worker)
 
     def emit_show_dialog_signal(self, all_topk_phenotypes, entity_type, id_type, file_path, selected_column, feature_label, phenotype):
         """Emit signal to show dialog in the main thread."""
-        self.entity_type = entity_type
-        self.id_type = id_type
-        self.file_path = file_path
-        self.selected_column = selected_column
-        self.feature_label = feature_label
-        self.phenotype = phenotype
-
         self.show_dialog_signal.emit(all_topk_phenotypes)
 
     def show_multi_dialog(self, all_topk_entities):
         """Display the multi-selection dialog in the main thread."""
-        print("Preparing to show multi-selection dialog for all entities.")
-
-        # Pop up a dialog for multi-selection
         dialog = MultiEntitySelectionDialog(all_topk_entities)
         if dialog.exec_() == QDialog.Accepted:
             selected_entities = dialog.get_selected_entities()
             if selected_entities:
                 self.selected_entities = selected_entities
-                print(f"User selections: {self.selected_entities}")
-                # Continue processing after selection
                 self.continue_processing_after_selection()
-        else:
-            print("No selections made")
 
     def continue_processing_after_selection(self):
         """Pass the selected entities back for further processing."""
@@ -410,44 +382,108 @@ class ProcessTab(QWidget):
             self.clinical_data_path_input.setText(file_path)
 
     def finalize_data(self):
-        """Handle processing all data, including using the file_order list."""
-        cache_path = self.cache_path_input.text()  # Get the cache path from input field
-        clinical_data_path = self.clinical_data_path_input.text()  # Get the clinical data path from input field
-
-        # You can now access the file_order list here
+        """Handle processing all data in two steps."""
+        cache_path = self.cache_path_input.text()
+        clinical_data_path = self.clinical_data_path_input.text()
         file_order = self.get_file_order()
 
-        # Show loading animation for finalize process
-        self.show_loading_animation()  # Show the loading label and start animation
+        # Check if file_order is empty and prompt the user
+        if not file_order:
+            QMessageBox.warning(self, "Entity Order Required", "Please arrange the Entity Order before proceeding.")
+            return  # Exit the function if file_order is empty
 
-        # Pass variables to the worker
-        worker = Worker(process_and_merge_data, cache_path, clinical_data_path, file_order)
+        # Merge and prepare mapping
+        self.show_loading_animation()
+        worker = Worker(self.merge_and_prepare_mapping, cache_path, clinical_data_path, file_order)
+        worker.signals.result.connect(self.on_mapping_prepared)
+        worker.signals.error.connect(self.on_processing_error)
+        self.threadpool.start(worker)
+
+    def merge_and_prepare_mapping(self, cache_path, clinical_data_path, file_order):
+        """First step: merge data and prepare entity index mapping."""
+        # call `merge_data_and_generate_entity_mapping` to merge data and generate entity mapping
+        entity_index_id_mapping_df, merged_data, processed_data_path = merge_data_and_generate_entity_mapping(
+            cache_path, clinical_data_path, file_order
+        )
+        return entity_index_id_mapping_df, merged_data, processed_data_path
+
+    def on_mapping_prepared(self, result):
+        """Callback after merging and entity mapping generation."""
+        entity_index_id_mapping_df, merged_data, processed_data_path = result
+
+        if entity_index_id_mapping_df is None:
+            QMessageBox.critical(self, "Error", "Failed to prepare entity mapping.")
+            self.on_processing_complete()
+            return
+
+        # Filter and save edge data
+        worker = Worker(self.filter_edge_data_types, self.database_path, entity_index_id_mapping_df)
+        worker.signals.result.connect(self.on_unique_types_fetched)
+        worker.signals.error.connect(self.on_processing_error)
+        self.threadpool.start(worker)
+
+    def filter_edge_data_types(self, database_path, entity_index_id_mapping_df):
+        """Filter edge data and return unique Type values."""
+        filtered_edge_data, unique_types = filter_and_save_edge_data(database_path, entity_index_id_mapping_df)
+        return filtered_edge_data, unique_types
+
+    def on_unique_types_fetched(self, result):
+        """Show dialog to select edge data types based on unique values."""
+        filtered_edge_data, unique_types = result
+
+        # Show dialog to select edge types
+        dialog = TypeSelectionDialog(unique_types)
+        if dialog.exec_() == QDialog.Accepted:
+            selected_types = dialog.get_selected_types()
+            
+            # Filter edge data based on selected types
+            self.process_selected_edge_types(filtered_edge_data, selected_types)
+        else:
+            QMessageBox.warning(self, "Cancelled", "Edge data processing was cancelled.")
+            self.on_processing_complete()
+
+    def process_selected_edge_types(self, filtered_edge_data, selected_types):
+        """Filter edge data by selected types and save results."""
+        worker = Worker(self.final_edge_processing, filtered_edge_data, selected_types)
         worker.signals.finished.connect(self.on_processing_complete)
         worker.signals.error.connect(self.on_processing_error)
         self.threadpool.start(worker)
 
+    def final_edge_processing(self, filtered_edge_data, selected_types):
+        """Final processing of edge data based on selected types."""
+        # Use the selected types to process the edge data
+        entity_index_id_mapping_df = pd.read_csv('./cache/processed_data/entity_index_id_mapping.csv')
+        process_edge_data_with_selected_types(filtered_edge_data, selected_types, entity_index_id_mapping_df, './cache/processed_data')
+
     def clear_cache_folder(self):
-        """Clear the cache folder ./cache and recreate required subdirectories, with user confirmation"""
+        """Clear the cache folder ./cache and recreate required subdirectories, with user confirmation."""
         cache_folder = './cache'
         raw_id_mapping_dir = os.path.join(cache_folder, "raw_id_mapping")
         processed_data_dir = os.path.join(cache_folder, "processed_data")
 
         # Show a confirmation dialog
         reply = QMessageBox.question(self, 'Clear Cache Confirmation',
-                                    "Are you sure you want to clear the cache folder? This action cannot be undone.",
+                                    "Are you sure you want to clear the cache folder? This action will keep folders starting with an underscore.",
                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
 
         if reply == QMessageBox.Yes:
             if os.path.exists(cache_folder):
                 try:
-                    # Delete the cache folder and its contents
-                    shutil.rmtree(cache_folder)
+                    # Loop through items in cache folder, skipping folders that start with an underscore
+                    for item in os.listdir(cache_folder):
+                        item_path = os.path.join(cache_folder, item)
+                        if item.startswith('_'):
+                            continue  # Skip this item
+                        if os.path.isdir(item_path):
+                            shutil.rmtree(item_path)  # Remove non-underscore folders
+                        else:
+                            os.remove(item_path)  # Remove files
+
+                    # Recreate the necessary subdirectories
+                    os.makedirs(raw_id_mapping_dir, exist_ok=True)
+                    os.makedirs(processed_data_dir, exist_ok=True)
                     
-                    # Recreate the empty cache folder and the necessary subdirectories
-                    os.makedirs(raw_id_mapping_dir)
-                    os.makedirs(processed_data_dir)
-                    
-                    QMessageBox.information(self, "Success", "Cache folder has been cleared.")
+                    QMessageBox.information(self, "Success", "Cache folder has been cleared, keeping underscore folders.")
                 except Exception as e:
                     QMessageBox.critical(self, "Error", f"Failed to clear cache folder: {e}")
             else:
@@ -572,3 +608,62 @@ class FileOrderDialog(QDialog):
             self.ordered_files.append(file_name_without_ext)
         
         self.accept()  # Close the dialog and return the result
+
+
+class TypeSelectionDialog(QDialog):
+    def __init__(self, unique_types, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Edge Types")
+        self.setWindowIcon(QIcon("assets/icons/logo.png"))
+        self.resize(300, 400)
+
+        layout = QVBoxLayout(self)
+
+        # Select "All / None" with inline clickable links
+        button_layout = QHBoxLayout()
+        select_label = QLabel("Select")
+        button_layout.addWidget(select_label)
+
+        # Add clickable links for "All" and "None"
+        all_none_label = QLabel('<a href="all">All</a> / <a href="none">None</a>')
+        all_none_label.setTextFormat(Qt.RichText)
+        all_none_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        all_none_label.linkActivated.connect(self.handle_link_click)
+        button_layout.addWidget(all_none_label)
+
+        # Add the layout to the main layout
+        layout.addLayout(button_layout)
+
+        # Add checkboxes for each unique type
+        self.checkboxes = []
+        for edge_type in unique_types:
+            checkbox = QCheckBox(edge_type)
+            checkbox.setChecked(True)
+            self.checkboxes.append(checkbox)
+            layout.addWidget(checkbox)
+
+        # Add OK and Cancel buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def handle_link_click(self, link):
+        if link == "all":
+            self.select_all()
+        elif link == "none":
+            self.select_none()
+
+    def select_all(self):
+        """Select all types."""
+        for checkbox in self.checkboxes:
+            checkbox.setChecked(True)
+
+    def select_none(self):
+        """Deselect all types."""
+        for checkbox in self.checkboxes:
+            checkbox.setChecked(False)
+
+    def get_selected_types(self):
+        """Return the list of selected types."""
+        return [checkbox.text() for checkbox in self.checkboxes if checkbox.isChecked()]
