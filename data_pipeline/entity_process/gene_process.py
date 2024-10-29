@@ -2,13 +2,14 @@
 
 import pandas as pd
 import numpy as np
+import os
 
-def process_gene(entity_type, id_type, file_path, selected_column, feature_label):
+def process_gene(entity_type, id_type, file_path, selected_column, feature_label, database_path):
     """Process Gene data."""
     print(f"Processing Gene: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}, Feature Label: {feature_label}")
     
-    # Load the gene entity data
-    gene_entity_data = pd.read_csv('resources/database/BioMedGraphica/Node/Gene/biomedgraphica_gene.csv')    
+    gene_csv_path = os.path.join(database_path, "Node", "Gene", "biomedgraphica_gene.csv")
+    gene_entity_data = pd.read_csv(gene_csv_path)
         
     # Determine the separator based on the file extension
     if file_path.endswith('.txt') or file_path.endswith('.tsv'):

@@ -2,12 +2,14 @@
 
 import pandas as pd
 import numpy as np
+import os
 
-def process_transcript(entity_type, id_type, file_path, selected_column, feature_label):
+def process_transcript(entity_type, id_type, file_path, selected_column, feature_label, database_path):
     """Process Transcript data."""
     print(f"Processing Transcript: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}")
     
-    transcript_entity_data = pd.read_csv('resources/database/BioMedGraphica/Node/Transcript/biomedgraphica_transcript.csv')
+    transcript_csv_path = os.path.join(database_path, "Node", "Transcript", "biomedgraphica_transcript.csv")
+    transcript_entity_data = pd.read_csv(transcript_csv_path)
 
     # Determine the separator based on the file extension
     if file_path.endswith('.txt') or file_path.endswith('.tsv'):
