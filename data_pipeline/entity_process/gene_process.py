@@ -8,7 +8,7 @@ def process_gene(entity_type, id_type, file_path, selected_column, feature_label
     """Process Gene data."""
     print(f"Processing Gene: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}, Feature Label: {feature_label}")
     
-    gene_csv_path = os.path.join(database_path, "Node", "Gene", "biomedgraphica_gene.csv")
+    gene_csv_path = os.path.join(database_path, "Entity", "Gene", "biomedgraphica_gene.csv")
     gene_entity_data = pd.read_csv(gene_csv_path)
         
     # Determine the separator based on the file extension

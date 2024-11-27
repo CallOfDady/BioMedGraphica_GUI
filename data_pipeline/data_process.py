@@ -105,7 +105,7 @@ def merge_data_and_generate_entity_mapping(cache_folder, file_order):
 
 def filter_and_save_edge_data(database_path, entity_index_id_mapping):
     """Filter edge data based on entity index and return unique types."""
-    edge_csv_path = os.path.join(database_path, 'Interaction', 'biomedgraphica_edge.csv')
+    edge_csv_path = os.path.join(database_path, 'Relation', 'biomedgraphica_relation.csv')
     edge_data_raw = pd.read_csv(edge_csv_path)
 
     edge_data = edge_data_raw[['From_ID', 'To_ID', 'Type']].copy()

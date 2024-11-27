@@ -119,18 +119,18 @@ class WelcomeTab(QWidget):
 
     def validate_directory_structure(self, folder_path):
         """Validate the structure of the selected directory."""
-        expected_folders = {"Interaction", "Node"}
+        expected_folders = {"Relation", "Entity"}
         actual_folders = set(os.listdir(folder_path))
         return expected_folders.issubset(actual_folders)
 
     def load_entity_data(self, folder_path):
-        """Load entity data from the 'node' folder and display it in a bar plot and text display."""
-        node_folder = os.path.join(folder_path, "Node")
+        """Load entity data from the 'Entity' folder and display it in a bar plot and text display."""
+        entity_folder = os.path.join(folder_path, "Entity")
         entity_counts = {}
 
-        # Traverse each subfolder in the 'node' folder
-        for entity_folder in os.listdir(node_folder):
-            entity_path = os.path.join(node_folder, entity_folder)
+        # Traverse each subfolder in the 'Entity' folder
+        for entity_folder in os.listdir(entity_folder):
+            entity_path = os.path.join(entity_folder, entity_folder)
             if os.path.isdir(entity_path):
                 # Assume each folder has one CSV file
                 csv_files = [f for f in os.listdir(entity_path) if f.endswith('.csv')]

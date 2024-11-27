@@ -8,7 +8,7 @@ def process_promoter(entity_type, id_type, file_path, selected_column, feature_l
     """Process Gene data."""
     print(f"Processing Gene: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}, Feature Label: {feature_label}")
 
-    promoter_csv_path = os.path.join(database_path, "Node", "Promoter", "biomedgraphica_promoter.csv")
+    promoter_csv_path = os.path.join(database_path, "Entity", "Promoter", "biomedgraphica_promoter.csv")
     promoter_entity_data = pd.read_csv(promoter_csv_path)
         
     # Determine the separator based on the file extension
