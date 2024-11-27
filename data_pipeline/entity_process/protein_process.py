@@ -65,7 +65,7 @@ def process_protein(entity_type, id_type, file_path, selected_column, feature_la
 
     # Step 7: Transpose the data back to the original format (Sample_ID | Protein1 | Protein2 | ...)
     protein_data_final = protein_data.set_index('BioMedGraphica_ID').T.reset_index()
-    protein_data_final.rename(columns={'index': selected_column}, inplace=True)
+    protein_data_final.rename(columns={'index': 'Sample_ID'}, inplace=True)
 
     # Export the final processed protein data to a CSV file (without additional suffix)
     output_file_path = f'cache/{feature_label.lower()}.csv'

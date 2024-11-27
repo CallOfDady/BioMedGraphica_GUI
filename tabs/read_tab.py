@@ -22,7 +22,7 @@ def read_file(file_path, id_type):
     first_5_columns = df.columns[:5]
     last_5_columns = df.columns[-5:]
     target_columns = list(first_5_columns) + list(last_5_columns)
-    valid_columns = [col for col in target_columns if "id" in col.lower() or "name" in col.lower()]
+    valid_columns = [col for col in target_columns if "id" in col.lower() or "name" in col.lower() or "sample" in col.lower() or "patient" in col.lower()]
     
     return valid_columns
 
@@ -101,13 +101,7 @@ class ReadTab(QWidget):
         self.files_loaded = 0  # Counter for files loaded
         self.threadpool = QThreadPool()
 
-        # Add loading label
-        self.loading_label = QLabel("Loading columns...")
-        self.layout.addWidget(self.loading_label)
-        self.animation_chars = cycle(["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"])
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_loading_animation)
-        self.timer.start(100)
+        self.loading_task = "Loading columns"
 
         # Create a ReadRow for each entry in file_info_list without columns initially
         for feature_label, entity_type, id_type, file_path in self.file_info_list:
@@ -131,10 +125,22 @@ class ReadTab(QWidget):
         self.intersection_button.clicked.connect(self.start_compute_intersection)
         self.layout.addWidget(self.intersection_button)
 
+        # Add loading label
+        self.loading_label = QLabel("Loading columns...")
+        self.loading_label.setStyleSheet("font-weight: bold; color: black;")
+        self.loading_label.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+        self.layout.addWidget(self.loading_label, alignment=Qt.AlignLeft | Qt.AlignBottom)
+
+        # Loading animation
+        self.animation_chars = cycle(["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"])
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_loading_animation)
+        self.timer.start(100)
+
     def update_loading_animation(self):
         """Update the loading label with the next animation character."""
         char = next(self.animation_chars)
-        self.loading_label.setText(f"Loading... {char}")
+        self.loading_label.setText(f"{self.loading_task}... {char}")
 
     def update_row_columns(self, index, columns):
         """Update the columns for a specific row."""
@@ -148,19 +154,24 @@ class ReadTab(QWidget):
         if self.files_loaded == len(self.read_rows):
             self.timer.stop()
             self.loading_label.setText("Columns loaded.")
+        else:
+            self.loading_task = "Loading columns"  # Set task type
+            self.timer.start(100)
 
     def get_read_info(self):
-        """Get selected columns from all rows, including file_info_list content."""
+        """Get selected columns from all rows, excluding Clinical type data."""
         read_info_list = []
         for (feature_label, entity_type, id_type, file_path), row in zip(self.file_info_list, self.read_rows):
-            selected_column = row.get_selected_column()
-            read_info_list.append((feature_label, entity_type, id_type, file_path, selected_column))
+            if entity_type != "Clinical":  # Exclude Clinical data
+                selected_column = row.get_selected_column()
+                read_info_list.append((feature_label, entity_type, id_type, file_path, selected_column))
         return read_info_list
 
     def start_compute_intersection(self):
         """Start the intersection computation in a separate thread."""
         self.intersection_button.setEnabled(False)
-        self.loading_label.setText("Computing intersection...")
+        self.loading_task = "Computing intersection"  # Set task type
+        self.loading_label.setText(f"{self.loading_task}...")
         self.timer.start(100)
 
         # Clear cache folders starting with "_"
@@ -190,18 +201,38 @@ class ReadTab(QWidget):
         """Handle completion of the intersection computation."""
         self.timer.stop()
         self.loading_label.setText("Intersection complete.")
+        self.loading_task = "Idle"  # Reset task type
         self.common_samples_count.setText(str(num_common_samples))
 
     def on_compute_error(self, error):
         """Handle errors during the intersection computation."""
         self.timer.stop()
-        exctype, value, traceback_str = error
-        QMessageBox.critical(self, "Error", f"An error occurred: {value}\n{traceback_str}")
         self.loading_label.setText("Error during computation.")
+        self.loading_task = "Idle"  # Reset task type
         self.intersection_button.setEnabled(True)
+
+    def clear_cache_folder(self):
+        """Clear the cache folder and recreate required subdirectories."""
+        cache_folder = './cache'
+        raw_id_mapping_dir = os.path.join(cache_folder, "raw_id_mapping")
+        processed_data_dir = os.path.join(cache_folder, "processed_data")
+
+        # Delete cache folder and its contents
+        if os.path.exists(cache_folder):
+            try:
+                shutil.rmtree(cache_folder)  # Remove entire cache folder
+            except Exception as e:
+                print(f"Failed to clear cache folder: {e}")
+
+        # Recreate the cache and required subdirectories
+        os.makedirs(raw_id_mapping_dir, exist_ok=True)
+        os.makedirs(processed_data_dir, exist_ok=True)
 
     def compute_intersection(self):
         """Compute the intersection of the first column across all files and save new files."""
+        # Clear and recreate cache folder structure
+        self.clear_cache_folder()
+        
         intersection_samples = None  # For accumulating intersection
 
         # Load each file's first column and compute intersection
@@ -221,9 +252,11 @@ class ReadTab(QWidget):
         # Count of common samples (excluding header)
         num_common_samples = len(intersection_samples)
 
-        # Create output folder named "./cache/_{num_common_samples}"
-        cache_folder = f"./cache/_{num_common_samples}"
-        os.makedirs(cache_folder, exist_ok=True)
+        # Create output folders for Clinical and non-Clinical data
+        x_cache_folder = f"./cache/_x_{num_common_samples}"
+        y_cache_folder = f"./cache/_y_{num_common_samples}"
+        os.makedirs(x_cache_folder, exist_ok=True)
+        os.makedirs(y_cache_folder, exist_ok=True)
 
         # Save new CSV files with intersection samples only
         for file_info in self.file_info_list:
@@ -231,9 +264,17 @@ class ReadTab(QWidget):
             df = pd.read_csv(file_path)
             df_intersection = df[df.iloc[:, 0].isin(intersection_samples)]
             
+            # Rename the first column for Clinical files
+            if entity_type == "Clinical":
+                df_intersection.rename(columns={df_intersection.columns[0]: "Sample_ID"}, inplace=True)
+        
             # New filename with row count appended
             base_name = os.path.basename(file_path)
-            new_file_path = os.path.join(cache_folder, f"{base_name.replace('.csv', '')}_{num_common_samples}.csv")
+            if entity_type == "Clinical":
+                new_file_path = os.path.join(y_cache_folder, f"{base_name.replace('.csv', '')}_{num_common_samples}.csv")
+            else:
+                new_file_path = os.path.join(x_cache_folder, f"{base_name.replace('.csv', '')}_{num_common_samples}.csv")
+                
             df_intersection.to_csv(new_file_path, index=False)
             
             # Update file path in file_info_list

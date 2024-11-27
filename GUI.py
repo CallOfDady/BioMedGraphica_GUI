@@ -260,7 +260,7 @@ class LoadingDialog(QDialog):
 
     def update_loading_animation(self):
         char = next(self.animation_chars)
-        self.loading_label.setText(f"Loading... {char}")
+        self.loading_label.setText(f"Loading BioBERT model, please wait... {char}")
 
 
 def load_models():
@@ -299,7 +299,7 @@ if __name__ == "__main__":
     font.setPointSize(14)
     app.setFont(font)
 
-    loading_dialog = LoadingDialog("Loading BioBERT model, please wait...")
+    loading_dialog = LoadingDialog("Welcome to BioMedGraphica Database\nAuthor: Fuhai Li AI Lab")
     loading_dialog.show()
 
     def on_load_complete(result):

@@ -82,7 +82,10 @@ class ExportTab(QWidget):
         export_layout.addWidget(self.export_button)
 
         # Loading animation
-        self.loading_label = QLabel("")
+        self.loading_label = QLabel("Exporting...")
+        self.loading_label.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+        self.loading_label.setStyleSheet("font-weight: bold; color: black;")
+        self.loading_label.hide()
         export_layout.addWidget(self.loading_label)
 
         self.layout.addLayout(export_layout)
@@ -128,12 +131,14 @@ class ExportTab(QWidget):
 
     def start_export_process(self):
         """Begin the export process with loading animation and multithreading."""
+        self.loading_label.show()
+        self.loading_label.setText("Exporting...")
+
         worker = Worker(self.export_cache_data)
         worker.signals.finished.connect(self.on_export_complete)
         worker.signals.error.connect(self.on_export_error)
         worker.signals.result.connect(self.on_export_result)
 
-        # Display loading animation
         self.animation_chars = cycle(["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"])
         self.loading_timer = QTimer()
         self.loading_timer.timeout.connect(self.update_loading_animation)
@@ -191,7 +196,7 @@ class ExportTab(QWidget):
     def on_export_complete(self):
         """Stop the loading animation on completion."""
         self.loading_timer.stop()
-        self.loading_label.setText("Export completed successfully.")
+        self.loading_label.setText("Export completed.")
 
     def on_export_error(self, error):
         """Handle errors that occur during export."""
@@ -201,4 +206,4 @@ class ExportTab(QWidget):
         QMessageBox.critical(self, "Error", f"An error occurred: {value}\n{traceback_str}")
 
     def on_export_result(self, result):
-        QMessageBox.information(self, "Success", f"Export completed successfully.")
+        QMessageBox.information(self, "Success", f"Export completed.")

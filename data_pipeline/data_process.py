@@ -3,45 +3,79 @@
 import os
 import pandas as pd
 import numpy as np
+import glob
 from collections import defaultdict
 
-def merge_data_and_generate_entity_mapping(cache_folder, clinical_data_path, file_order):
+def merge_data_and_generate_entity_mapping(cache_folder, file_order):
     # Initialize dictionary and list for storing dataframes and sample_id sets
     all_sample_dataframes = {}
     sample_id_sets = []
 
-    processed_data_path = './cache/processed_data/'
+    # Define processed data path based on the given cache_folder
+    processed_data_path = os.path.join(cache_folder, 'processed_data/')
     os.makedirs(processed_data_path, exist_ok=True)
 
     print('File order:', file_order)
 
-    print('Reading clinical data...')
-    clinical_data = pd.read_csv(clinical_data_path)
+    # Find the clinical data path within the cache folder
+    def get_clinical_data_path(cache_folder):
+        """
+        Locate the clinical data file in the cache folder by identifying the
+        unique folder that starts with '_y' and contains a single .csv file.
+        """
+        # Locate '_y' prefixed folders within cache_folder
+        y_folders = [f for f in os.listdir(cache_folder) if f.startswith('_y') and os.path.isdir(os.path.join(cache_folder, f))]
+        
+        # Ensure there is exactly one '_y' folder
+        if len(y_folders) != 1:
+            raise ValueError("There should be exactly one '_y' folder in the cache folder.")
+
+        # Path to the identified '_y' folder
+        y_folder_path = os.path.join(cache_folder, y_folders[0])
+
+        # Find all .csv files within the '_y' folder
+        csv_files = glob.glob(os.path.join(y_folder_path, '*.csv'))
+
+        # Ensure there is exactly one .csv file
+        if len(csv_files) != 1:
+            raise ValueError("The '_y' folder should contain exactly one .csv file.")
+
+        # Return the path to the unique .csv file
+        return csv_files[0]
+
+    # Integrate the clinical data path retrieval and read the data
+    try:
+        clinical_data_path = get_clinical_data_path(cache_folder)
+        print('Reading clinical data...')
+        clinical_data = pd.read_csv(clinical_data_path)
+        print(f"Clinical data successfully loaded from: {clinical_data_path}")
+    except ValueError as e:
+        print(f"Error: {e}")
 
     # Traverse all files in the cache folder
     for file_name in os.listdir(cache_folder):
         if file_name.endswith('.csv'):
             file_path = os.path.join(cache_folder, file_name)
-            df = pd.read_csv(file_path).sort_values(by='Patient_ID')
+            df = pd.read_csv(file_path).sort_values(by='Sample_ID')
             variable_name = os.path.splitext(file_name)[0] + '_df'
             all_sample_dataframes[variable_name] = df
             sample_ids = set(df.iloc[:, 0])
             sample_id_sets.append(sample_ids)
-    
+
     # Calculate the intersection of all sample_id sets
     if sample_id_sets:
         common_sample_ids = set.intersection(*sample_id_sets)
-        print(f"Found {len(common_sample_ids)} common Patient_IDs across all files.")
+        print(f"Found {len(common_sample_ids)} common Sample_IDs across all files.")
         
         # Export the common_sample_ids to a CSV file
-        common_id_df = pd.DataFrame({'Patient_ID': sorted(common_sample_ids)})
+        common_id_df = pd.DataFrame({'Sample_ID': sorted(common_sample_ids)})
         common_id_df.to_csv(os.path.join(processed_data_path, 'common_sample_ids.csv'), index=False)
     else:
-        print("No files found or no Patient_IDs extracted.")
+        print("No files found or no Sample_IDs extracted.")
         return None, None, processed_data_path
     
     # Filter and save clinical data
-    clinical_data = clinical_data[clinical_data['Patient_ID'].isin(common_sample_ids)].sort_values(by='Patient_ID')
+    clinical_data = clinical_data[clinical_data['Sample_ID'].isin(common_sample_ids)].sort_values(by='Sample_ID')
     clinical_data.to_csv(os.path.join(processed_data_path, 'filtered_clinical_data.csv'), index=False)
     np.save(os.path.join(processed_data_path, 'yAll.npy'), clinical_data.iloc[:, 1:].astype(np.float64).to_numpy())
 
@@ -51,7 +85,7 @@ def merge_data_and_generate_entity_mapping(cache_folder, clinical_data_path, fil
         variable_name = file_name + '_df'
         if variable_name in all_sample_dataframes:
             df = all_sample_dataframes[variable_name]
-            df = df[df['Patient_ID'].isin(common_sample_ids)]
+            df = df[df['Sample_ID'].isin(common_sample_ids)]
             entity_index_id_mapping.extend(df.columns[1:])
             data_array = df.iloc[:, 1:].values.astype(np.float64)
             merged_data = data_array if merged_data is None else np.concatenate((merged_data, data_array), axis=1)

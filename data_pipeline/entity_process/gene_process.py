@@ -75,7 +75,7 @@ def process_gene(entity_type, id_type, file_path, selected_column, feature_label
 
         # Step 7: Transpose the data back to the original format (Sample_ID | Gene1 | Gene2 | ...)
         cnv_final = cnv_data.set_index('BioMedGraphica_ID').T.reset_index()
-        cnv_final.rename(columns={'index': selected_column}, inplace=True)
+        cnv_final.rename(columns={'index': 'Sample_ID'}, inplace=True)
 
         # Export the final processed CNV data to a CSV file
         output_file_path = f'cache/{feature_label.lower()}.csv'

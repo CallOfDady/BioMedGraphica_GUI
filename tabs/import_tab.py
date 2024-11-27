@@ -22,24 +22,25 @@ class UploadRow(QWidget):
         self.feature_label.setFixedWidth(300)
         self.feature_label.setPlaceholderText("Omics Feature Label")
 
-        # Entity type dropdown
-        self.entity_type = QComboBox()
-        self.entity_type.setFixedWidth(300)
-        self.entity_type.addItems(["Gene", "Transcript", "Protein", "Promoter", "Drug", "Disease", "Phenotype", "MicroBiome"])
-        self.entity_type.setEditable(True)
-        self.entity_type.lineEdit().setPlaceholderText("Entity Type")
-        self.entity_type.setCurrentIndex(-1)
+        # Data Type dropdown
+        self.data_type = QComboBox()
+        self.data_type.setFixedWidth(300)
+        self.data_type.addItems(["Gene", "Transcript", "Protein", "Promoter", "Drug", "Disease", "Phenotype", "MicroBiome", "Clinical"])
+        self.data_type.setEditable(True)
+        self.data_type.lineEdit().setPlaceholderText("Data Type")
+        self.data_type.setCurrentIndex(-1)
 
         # Entity ID type dropdown
         self.id_types_dict = {
             "Gene": ["Ensembl_Gene_ID", "Locus-based ID", "HGNC_Symbol", "Ensembl_Gene_ID_Version", "HGNC_ID", "OMIM_ID", "NCBI_ID", "RefSeq_ID", "GO_ID"],
             "Transcript": ["Ensembl_Transcript_ID", "Ensembl_Transcript_ID_Version", "Ensembl_Gene_ID", "Reactome_ID", "RefSeq_ID", "RNACentral_ID"],
-            "Protein": ["Ensembl_Protein_ID", "Ensembl_Protein_ID_Version", "RefSeq_ID", "Uniprot_ID"],
+            "Protein": ["Ensembl_Protein_ID", "Ensembl_Protein_ID_Version", "RefSeq_ID", "Uniprot_ID", "HGNC_Symbol"],
             "Promoter": ["Ensembl_Gene_ID", "HGNC_Symbol", "Ensembl_Gene_ID_Version", "HGNC_ID", "OMIM_ID", "NCBI_ID", "RefSeq_ID", "GO_ID"],
             "Drug": ["PubChem_CID_ID", "PubChem_SID_ID", "CAS_ID", "NDC_ID", "UNII_ID", "InChI_ID", "ChEBI_ID", "DrugBank_ID"],
             "Disease": ["OMIM_ID", "ICD11_ID", "ICD10_ID", "DO_ID", "SnomedCT_ID", "UMLS_ID", "MeSHID", "Mondo_ID"],
             "Phenotype": ["Phenotype_Name", "HPO_ID", "OMIM_ID", "Orpha_ID", "UMLS_ID"], 
             "MicroBiome": ["NCBI_ID", "SILVA_ID", "Greengenes_ID", "RDP_ID", "RNACentral_ID", "GTDB_ID"],
+            "Clinical": [""]
         }
 
         self.id_type = QComboBox()
@@ -65,14 +66,14 @@ class UploadRow(QWidget):
         self.layout.addWidget(self.add_button)
         self.layout.addWidget(self.remove_button)
         self.layout.addWidget(self.feature_label)
-        self.layout.addWidget(self.entity_type)
+        self.layout.addWidget(self.data_type)
         self.layout.addWidget(self.id_type)
         self.layout.addWidget(self.path_display)
         self.layout.addWidget(self.upload_button)
         self.layout.addWidget(self.clear_button)
 
         # Set callbacks
-        self.entity_type.currentTextChanged.connect(self.update_id_type)
+        self.data_type.currentTextChanged.connect(self.update_id_type)
         self.remove_callback = remove_callback
         self.insert_callback = insert_callback
         self.remove_button.clicked.connect(self.remove_row)
@@ -81,8 +82,8 @@ class UploadRow(QWidget):
         self.clear_button.clicked.connect(self.clear_path)
 
     def update_id_type(self):
-        """Update the id_type dropdown based on the selected entity_type"""
-        entity = self.entity_type.currentText()
+        """Update the id_type dropdown based on the selected data_type"""
+        entity = self.data_type.currentText()
         self.id_type.clear()
         if entity in self.id_types_dict:
             id_types = self.id_types_dict[entity]
@@ -123,16 +124,16 @@ class UploadRow(QWidget):
             self.insert_callback(self)
 
     def get_file_info(self):
-        """Get feature label, entity type, id type, file path"""
+        """Get feature label, Data Type, id type, file path"""
         return (self.feature_label.text(), 
-                self.entity_type.currentText(), 
+                self.data_type.currentText(), 
                 self.id_type.currentText(), 
                 self.path_display.text())
 
-    def set_file_info(self, feature_label, entity_type, id_type, file_path):
-        """Set feature label, entity type, id type, file path"""
+    def set_file_info(self, feature_label, data_type, id_type, file_path):
+        """Set feature label, Data Type, id type, file path"""
         self.feature_label.setText(feature_label)
-        self.entity_type.setCurrentText(entity_type)
+        self.data_type.setCurrentText(data_type)
         self.id_type.setCurrentText(id_type)
         self.path_display.setText(file_path)
 
@@ -143,6 +144,9 @@ class ImportTab(QWidget):
         # Main layout
         self.main_layout = QVBoxLayout(self)
         
+        # Track if "Clinical" has been selected
+        self.clinical_selected = False
+
         # Config file label and buttons at the top
         self.setup_config_controls()
 
@@ -198,6 +202,7 @@ class ImportTab(QWidget):
     def add_row(self, after_row=None):
         """Add a new row to the upload area"""
         row = UploadRow(self, remove_callback=self.remove_row, insert_callback=self.add_row)
+        row.data_type.currentTextChanged.connect(self.check_clinical_selection)  # Connect signal to check Clinical selection
         if after_row:
             index = self.upload_rows.index(after_row) + 1
             self.upload_rows.insert(index, row)
@@ -205,6 +210,15 @@ class ImportTab(QWidget):
         else:
             self.upload_rows.append(row)
             self.upload_rows_layout.addWidget(row)
+
+    def check_clinical_selection(self):
+        """Ensure only one row can have 'Clinical' selected as data type."""
+        clinical_rows = [row for row in self.upload_rows if row.data_type.currentText() == "Clinical"]
+        if len(clinical_rows) > 1:
+            # More than one Clinical selected, revert the latest selection and show a message
+            QMessageBox.warning(self, "Selection Error", "Only one 'Clinical' data type can be selected.")
+            for row in clinical_rows[1:]:  # Revert all except the first Clinical selection
+                row.data_type.setCurrentIndex(-1)
 
     def remove_row(self, row):
         """Remove a row from the upload area"""
@@ -214,19 +228,25 @@ class ImportTab(QWidget):
             row.deleteLater()
 
     def get_all_file_info(self):
-        """Get file info from all rows"""
+        """Get file info from all rows, allowing feature_label and id_type to be empty if data_type is Clinical."""
         file_info_list = []
         for row in self.upload_rows:
-            feature_label, entity_type, id_type, file_path = row.get_file_info()
-            if not feature_label:
-                return None, "Missing Omics Feature Label"
-            if not entity_type:
-                return None, "Invalid Entity Type"
-            if not id_type:
-                return None, "Invalid ID Type"
+            feature_label, data_type, id_type, file_path = row.get_file_info()
+            
+            # If data_type is not Clinical, ensure feature_label and id_type are filled
+            if data_type != "Clinical":
+                if not feature_label:
+                    return None, "Missing Omics Feature Label"
+                if not id_type:
+                    return None, "Invalid ID Type"
+            
+            # Ensure file_path is valid for all data types
             if not file_path or not os.path.exists(file_path):
                 return None, "Invalid File Path"
-            file_info_list.append((feature_label, entity_type, id_type, file_path))
+            
+            # Append the row's data to file_info_list
+            file_info_list.append((feature_label, data_type, id_type, file_path))
+            
         return file_info_list, None
 
     def set_all_file_info(self, file_info_list):
@@ -237,12 +257,12 @@ class ImportTab(QWidget):
         self.upload_rows.clear()
 
         for file_info in file_info_list:
-            feature_label, entity_type, id_type, file_path = file_info
+            feature_label, data_type, id_type, file_path = file_info
             self.add_row()
-            self.upload_rows[-1].set_file_info(feature_label, entity_type, id_type, file_path)
+            self.upload_rows[-1].set_file_info(feature_label, data_type, id_type, file_path)
 
     def import_config_file(self):
-        """Import a CSV config file and populate the fields"""
+        """Import a CSV config file and populate the fields, converting all values to strings."""
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getOpenFileName(
             self, 
@@ -253,10 +273,10 @@ class ImportTab(QWidget):
         )
         if file_path:
             try:
-                df = pd.read_csv(file_path)
-                required_columns = ['Feature Label', 'Entity Type', 'ID Type', 'File Path']
+                df = pd.read_csv(file_path, dtype=str)  # Read all values as strings
+                required_columns = ['Feature Label', 'Data Type', 'ID Type', 'File Path']
                 if set(required_columns).issubset(df.columns):
-                    file_info_list = df[required_columns].values.tolist()
+                    file_info_list = df[required_columns].fillna('').values.tolist()  # Fill NaN with empty strings
                     self.set_all_file_info(file_info_list)
                 else:
                     print("CSV file does not have the required columns.")
@@ -264,11 +284,14 @@ class ImportTab(QWidget):
                 print(f"Failed to import config file: {e}")
 
     def export_config_file(self):
-        """Export the current form to a CSV config file"""
+        """Export the current form to a CSV config file, converting all values to strings."""
         file_info_list, error = self.get_all_file_info()
         if error:
             print(f"Error: {error}")
             return
+
+        # Convert all entries to strings to ensure consistent export
+        file_info_list = [[str(item) for item in row] for row in file_info_list]
 
         options = QFileDialog.Options()
         file_path, _ = QFileDialog.getSaveFileName(
@@ -280,7 +303,7 @@ class ImportTab(QWidget):
         )
         if file_path:
             try:
-                df = pd.DataFrame(file_info_list, columns=['Feature Label', 'Entity Type', 'ID Type', 'File Path'])
+                df = pd.DataFrame(file_info_list, columns=['Feature Label', 'Data Type', 'ID Type', 'File Path'])
                 df.to_csv(file_path, index=False)
             except Exception as e:
                 print(f"Failed to export config file: {e}")
