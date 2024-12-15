@@ -214,7 +214,7 @@ class ProcessTab(QWidget):
             return  # Exit if path is invalid
 
         database_path = DatabasePathManager.get_database_path()
-        task_name = f"Processing {row.entity_type} data"
+        task_name = f"Processing {row.entity_type} Data"
 
         # Show loading animation
         self.show_loading_animation(task_name)
@@ -259,6 +259,13 @@ class ProcessTab(QWidget):
 
     def emit_show_dialog_signal(self, all_topk_phenotypes, entity_type, id_type, file_path, selected_column, feature_label, phenotype):
         """Emit signal to show dialog in the main thread."""
+        self.entity_type = entity_type
+        self.id_type = id_type
+        self.file_path = file_path
+        self.selected_column = selected_column
+        self.feature_label = feature_label
+        self.phenotype = phenotype
+
         self.show_dialog_signal.emit(all_topk_phenotypes)
 
     def show_multi_dialog(self, all_topk_entities):

@@ -248,7 +248,7 @@ class LoadingDialog(QDialog):
         label = QLabel(message)
         layout.addWidget(label)
         self.setWindowIcon(QIcon("assets/icons/logo.png"))
-        self.setFixedSize(600, 300)
+        self.setFixedSize(800, 600)
 
         self.loading_label = QLabel()
         layout.addWidget(self.loading_label)
@@ -296,7 +296,7 @@ if __name__ == "__main__":
     ensure_directories_exist()
 
     font = QFont()
-    font.setPointSize(14)
+    font.setPointSize(16)
     app.setFont(font)
 
     loading_dialog = LoadingDialog("Welcome to BioMedGraphica Database\nAuthor: Fuhai Li AI Lab")

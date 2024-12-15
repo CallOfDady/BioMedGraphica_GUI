@@ -129,17 +129,21 @@ class WelcomeTab(QWidget):
         entity_counts = {}
 
         # Traverse each subfolder in the 'Entity' folder
-        for entity_folder in os.listdir(entity_folder):
-            entity_path = os.path.join(entity_folder, entity_folder)
+        for entity_subfolder in os.listdir(entity_folder):
+            entity_path = os.path.join(entity_folder, entity_subfolder)
             if os.path.isdir(entity_path):
-                # Assume each folder has one CSV file
-                csv_files = [f for f in os.listdir(entity_path) if f.endswith('.csv')]
+                # Assume each folder has one or more CSV files
+                csv_files = [
+                    f for f in os.listdir(entity_path)
+                    if f.endswith('.csv') and f.rsplit('_', 1)[-1].replace('.csv', '').lower() == entity_subfolder.lower()
+                ]
+
                 if csv_files:
-                    csv_file_path = os.path.join(entity_path, csv_files[0])
+                    csv_file_path = os.path.join(entity_path, csv_files[0])  # Use the first matching file
                     # Read CSV and count rows (excluding header)
                     row_count = self.get_csv_row_count(csv_file_path)
                     if row_count is not None:
-                        entity_counts[entity_folder] = row_count
+                        entity_counts[entity_subfolder] = row_count
 
         # Visualize and display entity counts if data is loaded
         if entity_counts:
