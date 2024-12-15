@@ -1,5 +1,6 @@
-Feature Label,Entity Type,ID Type,File Path
+Feature Label,Data Type,ID Type,File Path
 protein,Protein,Uniprot_ID,E:/LabWork/MedGraphica_GUI/input_data/proteomics.csv
 cnv,Gene,HGNC_Symbol,E:/LabWork/MedGraphica_GUI/input_data/transposed_cnv_file.csv
 gene_expression,Transcript,Ensembl_Gene_ID,E:/LabWork/MedGraphica_GUI/input_data/gene_expression.csv
 methylation,Promoter,HGNC_Symbol,E:/LabWork/MedGraphica_GUI/input_data/methylation_transposed.csv
+,Clinical,,E:/LabWork/MedGraphica_GUI/input_data/clinical_data.csv
