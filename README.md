@@ -1,4 +1,4 @@
-# MedGraphica_GUI
+# BioMedGraphica_GUI
 
 ## Usage Notes
 
