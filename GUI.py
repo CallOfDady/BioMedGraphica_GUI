@@ -54,7 +54,7 @@ class MedGraphica(QMainWindow):
         # Set main window properties
         self.setWindowTitle("MedGraphica")
         self.setWindowIcon(QIcon("assets/icons/logo.png"))
-        self.resize(2000, 900)
+        self.resize(1390, 900)
 
         # Center the window on the screen
         qr = self.frameGeometry()
@@ -178,10 +178,11 @@ class MedGraphica(QMainWindow):
             self.tab_widget.removeTab(2)
             self.tab_widget.insertTab(2, self.read_tab, "Read")
 
-            for i, (feature_label, entity_type, id_type, file_path) in enumerate(file_info_list):
-                worker = Worker(self.read_file_columns, file_path, id_type)
-                worker.signals.result.connect(lambda columns, index=i: self.update_read_tab_columns(index, columns))
-                self.threadpool.start(worker)
+            for i, (fill0, feature_label, entity_type, id_type, file_path) in enumerate(file_info_list):
+                if not fill0 and file_path:
+                    worker = Worker(self.read_file_columns, file_path, id_type)
+                    worker.signals.result.connect(lambda columns, index=i: self.update_read_tab_columns(index, columns))
+                    self.threadpool.start(worker)
         else:
             self.read_tab = self.create_default_read_tab()
             self.tab_widget.removeTab(2)

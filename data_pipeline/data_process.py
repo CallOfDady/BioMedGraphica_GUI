@@ -5,115 +5,94 @@ import pandas as pd
 import numpy as np
 import glob
 from collections import defaultdict
+from sklearn.preprocessing import StandardScaler
 
-def merge_data_and_generate_entity_mapping(cache_folder, file_order):
-    # Initialize dictionary and list for storing dataframes and sample_id sets
-    all_sample_dataframes = {}
-    sample_id_sets = []
-
-    # Define processed data path based on the given cache_folder
+def merge_data_and_generate_entity_mapping(cache_folder, file_order, apply_zscore=False):
     processed_data_path = os.path.join(cache_folder, 'processed_data/')
     os.makedirs(processed_data_path, exist_ok=True)
 
     print('File order:', file_order)
 
-    # Find the clinical data path within the cache folder
-    def get_clinical_data_path(cache_folder):
-        """
-        Locate the clinical data file in the cache folder by identifying the
-        unique folder that starts with '_y' and contains a single .csv file.
-        """
-        # Locate '_y' prefixed folders within cache_folder
+    # Step 1: Merge npy feature files 
+    merged_data = None
+    for file_name in file_order:
+        npy_file_path = os.path.join(cache_folder, f"{file_name}.npy")
+        if os.path.exists(npy_file_path):
+            data_array = np.load(npy_file_path)
+            
+            if apply_zscore:
+                scaler = StandardScaler()
+                data_array = scaler.fit_transform(data_array)
+
+            merged_data = data_array if merged_data is None else np.concatenate((merged_data, data_array), axis=1)
+        else:
+            print(f"Warning: {npy_file_path} does not exist.")
+
+    if merged_data is None:
+        print("No data merged. Exiting.")
+        return None, None, processed_data_path
+
+    # Step 2: Save merged data
+    x_all_path = os.path.join(processed_data_path, 'xAll.npy')
+    np.save(x_all_path, merged_data)
+    print(f"Merged data saved to: {x_all_path}")
+
+    # Step 3: Y
+    def get_label_data_path():
         y_folders = [f for f in os.listdir(cache_folder) if f.startswith('_y') and os.path.isdir(os.path.join(cache_folder, f))]
-        
-        # Ensure there is exactly one '_y' folder
         if len(y_folders) != 1:
-            raise ValueError("There should be exactly one '_y' folder in the cache folder.")
-
-        # Path to the identified '_y' folder
-        y_folder_path = os.path.join(cache_folder, y_folders[0])
-
-        # Find all .csv files within the '_y' folder
-        csv_files = glob.glob(os.path.join(y_folder_path, '*.csv'))
-
-        # Ensure there is exactly one .csv file
+            raise ValueError("Expect exactly one '_y' folder.")
+        csv_files = glob.glob(os.path.join(cache_folder, y_folders[0], '*.csv'))
         if len(csv_files) != 1:
-            raise ValueError("The '_y' folder should contain exactly one .csv file.")
-
-        # Return the path to the unique .csv file
+            raise ValueError("Expect exactly one label file in the '_y' folder.")
         return csv_files[0]
 
-    # Integrate the clinical data path retrieval and read the data
-    try:
-        clinical_data_path = get_clinical_data_path(cache_folder)
-        print('Reading clinical data...')
-        clinical_data = pd.read_csv(clinical_data_path)
-        print(f"Clinical data successfully loaded from: {clinical_data_path}")
-    except ValueError as e:
-        print(f"Error: {e}")
+    label_data_path = get_label_data_path()
+    label_df = pd.read_csv(label_data_path)
+    print(f"Loaded label data from {label_data_path}")
 
-    # Traverse all files in the cache folder
-    for file_name in os.listdir(cache_folder):
-        if file_name.endswith('.csv'):
-            file_path = os.path.join(cache_folder, file_name)
-            df = pd.read_csv(file_path).sort_values(by='Sample_ID')
-            variable_name = os.path.splitext(file_name)[0] + '_df'
-            all_sample_dataframes[variable_name] = df
-            sample_ids = set(df.iloc[:, 0])
-            sample_id_sets.append(sample_ids)
+    label_df = label_df.sort_values(by="Sample_ID").reset_index(drop=True)
+    # label_df.to_csv(os.path.join(processed_data_path, 'yAll.csv'), index=False)
+    label_df = label_df.drop(columns=["Sample_ID"])
 
-    # Calculate the intersection of all sample_id sets
-    if sample_id_sets:
-        common_sample_ids = set.intersection(*sample_id_sets)
-        print(f"Found {len(common_sample_ids)} common Sample_IDs across all files.")
-        
-        # Export the common_sample_ids to a CSV file
-        common_id_df = pd.DataFrame({'Sample_ID': sorted(common_sample_ids)})
-        common_id_df.to_csv(os.path.join(processed_data_path, 'common_sample_ids.csv'), index=False)
-    else:
-        print("No files found or no Sample_IDs extracted.")
-        return None, None, processed_data_path
-    
-    # Filter and save clinical data
-    clinical_data = clinical_data[clinical_data['Sample_ID'].isin(common_sample_ids)].sort_values(by='Sample_ID')
-    clinical_data.to_csv(os.path.join(processed_data_path, 'filtered_clinical_data.csv'), index=False)
-    np.save(os.path.join(processed_data_path, 'yAll.npy'), clinical_data.iloc[:, 1:].astype(np.float64).to_numpy())
+    y_all_path = os.path.join(processed_data_path, 'yAll.npy')
+    np.save(y_all_path, label_df.values)
 
-    # Filter the dataframes in the dictionary based on common_sample_ids and merge them
-    merged_data, entity_index_id_mapping = None, []
+    print(f"Label data saved to: {y_all_path}")
+
+    # Step 4: Construct entity_index_id_mapping using raw_id_mapping
+    mapping_dfs = []
     for file_name in file_order:
-        variable_name = file_name + '_df'
-        if variable_name in all_sample_dataframes:
-            df = all_sample_dataframes[variable_name]
-            df = df[df['Sample_ID'].isin(common_sample_ids)]
-            entity_index_id_mapping.extend(df.columns[1:])
-            data_array = df.iloc[:, 1:].values.astype(np.float64)
-            merged_data = data_array if merged_data is None else np.concatenate((merged_data, data_array), axis=1)
+        mapping_file_path = os.path.join(cache_folder, 'raw_id_mapping', f"{file_name}_id_map.csv")
+        if os.path.exists(mapping_file_path):
+            df = pd.read_csv(mapping_file_path)
+            mapping_dfs.append(df)
+        else:
+            print(f"Warning: Mapping file {mapping_file_path} not found.")
 
-    # Save the merged data to a NumPy file
-    np.save(os.path.join(processed_data_path, 'xAll.npy'), merged_data)
-    
-    # Create and save the entity index mapping
-    entity_index_id_mapping_df = pd.DataFrame({
-        'Index': range(len(entity_index_id_mapping)),
-        'BioMedGraphica_ID': entity_index_id_mapping
-    })
-    entity_index_id_mapping_df.to_csv(os.path.join(processed_data_path, 'entity_index_id_mapping.csv'), index=False)
+    full_mapping_df = pd.concat(mapping_dfs, ignore_index=True)
+    full_mapping_df["Index"] = range(len(full_mapping_df))  # Assign index
+    full_mapping_df = full_mapping_df[["Index", "Original_ID", "BioMedGraphica_Conn_ID"]]
 
-    return entity_index_id_mapping_df, merged_data, processed_data_path
+    # Step 5: Save entity_index_id_mapping
+    entity_mapping_path = os.path.join(processed_data_path, 'entity_index_id_mapping.csv')
+    full_mapping_df.to_csv(entity_mapping_path, index=False)
+    print(f"Entity index ID mapping saved to: {entity_mapping_path}")
+
+    return full_mapping_df, merged_data, processed_data_path
 
 
 def filter_and_save_edge_data(database_path, entity_index_id_mapping):
     """Filter edge data based on entity index and return unique types."""
-    edge_csv_path = os.path.join(database_path, 'Relation', 'biomedgraphica_relation.csv')
+    edge_csv_path = os.path.join(database_path, 'Relation', 'BioMedGraphica_Conn_Relation.csv')
     edge_data_raw = pd.read_csv(edge_csv_path)
 
-    edge_data = edge_data_raw[['From_ID', 'To_ID', 'Type']].copy()
+    edge_data = edge_data_raw[['BMGC_From_ID', 'BMGC_To_ID', 'Type']].copy()
 
     # Filter edge data based on entity_index_id_mapping
     filtered_edge_data = edge_data[
-        edge_data['From_ID'].isin(entity_index_id_mapping['BioMedGraphica_ID']) &
-        edge_data['To_ID'].isin(entity_index_id_mapping['BioMedGraphica_ID'])
+        edge_data['BMGC_From_ID'].isin(entity_index_id_mapping['BioMedGraphica_Conn_ID']) &
+        edge_data['BMGC_To_ID'].isin(entity_index_id_mapping['BioMedGraphica_Conn_ID'])
     ]
 
     # Get unique types from the filtered edge data
@@ -128,18 +107,33 @@ def process_edge_data_with_selected_types(filtered_edge_data, selected_types, en
     filtered_edge_data = filtered_edge_data[filtered_edge_data['Type'].isin(selected_types)]
     
     # Create From_Index and To_Index columns
-    entity_index = pd.Series(entity_index_id_mapping['Index'].values, index=entity_index_id_mapping['BioMedGraphica_ID'])
-    filtered_edge_data.loc[:, 'From_Index'] = filtered_edge_data['From_ID'].map(entity_index)
-    filtered_edge_data.loc[:, 'To_Index'] = filtered_edge_data['To_ID'].map(entity_index)
+    entity_index = pd.Series(entity_index_id_mapping['Index'].values, index=entity_index_id_mapping['BioMedGraphica_Conn_ID'])
+    filtered_edge_data.loc[:, 'From_Index'] = filtered_edge_data['BMGC_From_ID'].map(entity_index)
+    filtered_edge_data.loc[:, 'To_Index'] = filtered_edge_data['BMGC_To_ID'].map(entity_index)
     
     # Sort the edge data by From_Index
     filtered_edge_data = filtered_edge_data.sort_values(by=['From_Index'])
+
+    ppi_edge_data = filtered_edge_data[filtered_edge_data["Type"] == "Protein-Protein"]
+    internal_edge_data = filtered_edge_data[filtered_edge_data["Type"] != "Protein-Protein"]
 
     # Save edge_index as a NumPy array
     edge_index = filtered_edge_data[['From_Index', 'To_Index']].T
     np.save(os.path.join(processed_data_path, 'edge_index.npy'), edge_index.to_numpy().astype(np.int64))
 
-    # Save the filtered edge data with BioMedGraphica_ID
+    # Export PPI edges
+    if not ppi_edge_data.empty:
+        ppi_edge_index = ppi_edge_data[['From_Index', 'To_Index']].T.to_numpy().astype(np.int64)
+        np.save(os.path.join(processed_data_path, 'ppi_edge_index.npy'), ppi_edge_index)
+        print("Saved: ppi_edge_index.npy")
+
+    # Export internal edges
+    if not internal_edge_data.empty:
+        internal_edge_index = internal_edge_data[['From_Index', 'To_Index']].T.to_numpy().astype(np.int64)
+        np.save(os.path.join(processed_data_path, 'internal_edge_index.npy'), internal_edge_index)
+        print("Saved: internal_edge_index.npy")
+
+    # Save the filtered edge data with BioMedGraphica_Conn_ID
     filtered_edge_data.to_csv(os.path.join(processed_data_path, 'filtered_edge_id_index_data.csv'), index=False)
 
 

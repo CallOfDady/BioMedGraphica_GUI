@@ -44,8 +44,9 @@ class Worker(QRunnable):
             self.signals.finished.emit()
 
 class ProcessRow(QWidget):
-    def __init__(self, feature_label, entity_type, id_type, file_path, selected_column, process_tab_ref, parent=None):
+    def __init__(self, fill0, feature_label, entity_type, id_type, file_path, selected_column, process_tab_ref, sample_ids=None, parent=None):
         super().__init__(parent)
+        self.fill0 = fill0
         self.feature_label = feature_label
         self.entity_type = entity_type
         self.id_type = id_type
@@ -172,10 +173,28 @@ class ProcessTab(QWidget):
         upper_layout.addLayout(upper_control_layout)
 
         if read_info_list:
-            for feature_label, entity_type, id_type, file_path, selected_column in read_info_list:
-                row = ProcessRow(feature_label, entity_type, id_type, file_path, selected_column, process_tab_ref=self)
+            # print(read_info_list)  # Debugging
+            for item in read_info_list:
+                if len(item) == 7:
+                    fill0, feature_label, entity_type, id_type, file_path, sample_ids, selected_column = item
+                elif len(item) == 6:
+                    fill0, feature_label, entity_type, id_type, file_path, selected_column = item
+                    sample_ids = []
+                else:
+                    raise ValueError(f"Unexpected file_info format: {item}")
+                
+                if entity_type == "Label":
+                    continue
+                
+                row = ProcessRow(
+                    fill0, feature_label, entity_type, id_type,
+                    file_path, selected_column,
+                    process_tab_ref=self
+                )
                 self.process_rows.append(row)
                 upper_layout.addWidget(row)
+
+                row.sample_ids = sample_ids
 
         upper_layout.addStretch()
         scroll_area = QScrollArea()
@@ -250,7 +269,9 @@ class ProcessTab(QWidget):
                 row.file_path,
                 row.selected_column,
                 row.feature_label,
-                database_path=database_path
+                database_path=database_path,
+                fill0=row.fill0,
+                sample_ids=row.sample_ids
             )
 
         worker.signals.finished.connect(self.on_processing_complete)
@@ -362,6 +383,11 @@ class ProcessTab(QWidget):
         # Add the path layout to the cache layout
         cache_layout.addLayout(cache_path_layout)
 
+        # Add Z-Score Normalization checkbox
+        self.zscore_checkbox = QCheckBox("Z-Score Normalization")
+        self.zscore_checkbox.setChecked(False)
+        cache_layout.addWidget(self.zscore_checkbox)
+
         # Finalize button
         self.finalize_button = QPushButton("Finalize")
         self.finalize_button.clicked.connect(self.finalize_data)
@@ -385,6 +411,7 @@ class ProcessTab(QWidget):
         """Handle processing all data in two steps."""
         cache_path = self.cache_path_input.text()
         file_order = self.get_file_order()
+        apply_zscore = self.zscore_checkbox.isChecked()
 
         # Check if file_order is empty and prompt the user
         if not file_order:
@@ -397,16 +424,15 @@ class ProcessTab(QWidget):
         self.show_loading_animation("Finalizing data")
 
         # Merge and prepare mapping
-        worker = Worker(self.merge_and_prepare_mapping, cache_path, file_order)
+        worker = Worker(self.merge_and_prepare_mapping, cache_path, file_order, apply_zscore)
         worker.signals.result.connect(self.on_mapping_prepared)
         worker.signals.error.connect(self.on_processing_error)
         worker.signals.finished.connect(self.enable_process_buttons)  # Re-enable buttons after processing
         self.threadpool.start(worker)
 
-    def merge_and_prepare_mapping(self, cache_path, file_order):
-        """First step: merge data and prepare entity index mapping."""
+    def merge_and_prepare_mapping(self, cache_path, file_order, apply_zscore):
         entity_index_id_mapping_df, merged_data, processed_data_path = merge_data_and_generate_entity_mapping(
-            cache_path, file_order
+            cache_path, file_order, apply_zscore
         )
         return entity_index_id_mapping_df, merged_data, processed_data_path
 

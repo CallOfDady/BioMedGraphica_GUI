@@ -4,12 +4,16 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from itertools import cycle
+from functools import partial
 import sys
 import traceback
 import shutil
 
 def read_file(file_path, id_type):
     """Read a file and return a DataFrame with appropriate columns based on id_type."""
+    if not file_path or not os.path.isfile(file_path):
+        raise ValueError("Invalid or missing file path.")
+
     _, file_extension = os.path.splitext(file_path)
     
     if file_extension == ".csv":
@@ -82,9 +86,12 @@ class ReadRow(QWidget):
             self.update_columns(columns)
 
     def update_columns(self, columns):
-        """Update the column dropdown with the provided columns."""
         self.column_select.clear()
         self.column_select.addItems(columns)
+        if columns == ["(Virtual Node)"]:
+            self.column_select.setEnabled(False)
+        else:
+            self.column_select.setEnabled(True)
 
     def get_selected_column(self):
         """Get the selected column from the dropdown."""
@@ -98,17 +105,46 @@ class ReadTab(QWidget):
         self.file_info_list = [list(info) for info in file_info_list]
         self.layout = QVBoxLayout(self)
         self.read_rows = []
-        self.files_loaded = 0  # Counter for files loaded
+        self.files_loaded = 0  # Counter for completed loads
+        self.total_expected_loads = 0
         self.threadpool = QThreadPool()
 
         self.loading_task = "Loading columns"
 
+        # Add loading label
+        self.loading_label = QLabel("Loading columns...")
+        self.loading_label.setStyleSheet("font-weight: bold; color: black;")
+        self.loading_label.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+
+        # Loading animation
+        self.animation_chars = cycle(["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"])
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_loading_animation)
+        self.timer.start(100)
+
+
         # Create a ReadRow for each entry in file_info_list without columns initially
-        for feature_label, entity_type, id_type, file_path in self.file_info_list:
+        for index, (fill0, feature_label, entity_type, id_type, file_path) in enumerate(self.file_info_list):
             row = ReadRow(feature_label, entity_type, id_type, file_path)
             self.read_rows.append(row)
             self.layout.addWidget(row)
 
+            self.total_expected_loads += 1
+
+            print(f"[Debug] Starting worker for index={index}")
+
+            def start_worker(i=index, f0=fill0, fp=file_path, idt=id_type):
+                if not f0 and fp:
+                    worker = Worker(read_file, fp, idt)
+                else:
+                    worker = Worker(lambda: ["(Virtual Node)"])
+
+                worker.signals.result.connect(lambda columns, ix=i: self.update_row_columns(ix, columns))
+                self.threadpool.start(worker)
+
+            start_worker()
+                
+                
         # Add some spacing at the bottom
         self.layout.addStretch()
 
@@ -125,17 +161,7 @@ class ReadTab(QWidget):
         self.intersection_button.clicked.connect(self.start_compute_intersection)
         self.layout.addWidget(self.intersection_button)
 
-        # Add loading label
-        self.loading_label = QLabel("Loading columns...")
-        self.loading_label.setStyleSheet("font-weight: bold; color: black;")
-        self.loading_label.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
         self.layout.addWidget(self.loading_label, alignment=Qt.AlignLeft | Qt.AlignBottom)
-
-        # Loading animation
-        self.animation_chars = cycle(["⢿", "⣻", "⣽", "⣾", "⣷", "⣯", "⣟", "⡿"])
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_loading_animation)
-        self.timer.start(100)
 
     def update_loading_animation(self):
         """Update the loading label with the next animation character."""
@@ -143,28 +169,34 @@ class ReadTab(QWidget):
         self.loading_label.setText(f"{self.loading_task}... {char}")
 
     def update_row_columns(self, index, columns):
-        """Update the columns for a specific row."""
         if 0 <= index < len(self.read_rows):
             self.read_rows[index].update_columns(columns)
-        
-        # Increase the count of loaded files
-        self.files_loaded += 1
 
-        # Stop the loading animation once all rows are updated
-        if self.files_loaded == len(self.read_rows):
+        if not hasattr(self, "_loaded_indices"):
+            self._loaded_indices = set()
+
+        if index in self._loaded_indices:
+            print(f"[Debug] Skipping duplicate update for index={index}")
+            return
+
+        self._loaded_indices.add(index)
+        self.files_loaded += 1
+        print(f"[Debug] update_row_columns called for index={index}, columns={columns}, loaded={self.files_loaded}/{self.total_expected_loads}")
+
+        if self.files_loaded == self.total_expected_loads:
             self.timer.stop()
             self.loading_label.setText("Columns loaded.")
-        else:
-            self.loading_task = "Loading columns"  # Set task type
-            self.timer.start(100)
 
     def get_read_info(self):
-        """Get selected columns from all rows, excluding Clinical type data."""
+        """Return the full file_info + selected_column from each row."""
         read_info_list = []
-        for (feature_label, entity_type, id_type, file_path), row in zip(self.file_info_list, self.read_rows):
-            if entity_type != "Clinical":  # Exclude Clinical data
-                selected_column = row.get_selected_column()
-                read_info_list.append((feature_label, entity_type, id_type, file_path, selected_column))
+        for file_info, row in zip(self.file_info_list, self.read_rows):
+            selected_column = row.get_selected_column()
+            if len(file_info) == 6:
+                file_info = (*file_info, selected_column)
+            elif len(file_info) == 5:
+                file_info = (*file_info, selected_column, list(getattr(self, "intersection_samples", [])))
+            read_info_list.append(file_info)
         return read_info_list
 
     def start_compute_intersection(self):
@@ -179,6 +211,7 @@ class ReadTab(QWidget):
 
         # Create a worker for computing the intersection
         worker = Worker(self.compute_intersection)
+        print(f"[Debug] Starting intersection worker")
         worker.signals.result.connect(self.on_compute_finished)
         worker.signals.error.connect(self.on_compute_error)
         worker.signals.finished.connect(lambda: self.intersection_button.setEnabled(True))
@@ -208,8 +241,14 @@ class ReadTab(QWidget):
         """Handle errors during the intersection computation."""
         self.timer.stop()
         self.loading_label.setText("Error during computation.")
-        self.loading_task = "Idle"  # Reset task type
+        self.loading_task = "Idle"
         self.intersection_button.setEnabled(True)
+
+        exctype, value, tb = error
+        print("[ERROR]", exctype, value)
+        print(tb)
+
+        QMessageBox.critical(self, "Error", f"{value}\n\n{tb}")
 
     def clear_cache_folder(self):
         """Clear the cache folder and recreate required subdirectories."""
@@ -237,7 +276,13 @@ class ReadTab(QWidget):
 
         # Load each file's first column and compute intersection
         for file_info in self.file_info_list:
-            file_path = file_info[3]  # The original file path
+            fill0, feature_label, entity_type, id_type, file_path = file_info
+            if fill0:
+                continue  # Skip if fill0 is True
+
+            file_path = file_info[4]  # The original file path
+            if not os.path.exists(file_path):
+                raise ValueError(f"File not found: {file_path}")
             df = pd.read_csv(file_path, usecols=[0], dtype=str)
             current_samples = set(df.iloc[:, 0])
 
@@ -252,7 +297,7 @@ class ReadTab(QWidget):
         # Count of common samples (excluding header)
         num_common_samples = len(intersection_samples)
 
-        # Create output folders for Clinical and non-Clinical data
+        # Create output folders for Label and non-Label data
         x_cache_folder = f"./cache/_x_{num_common_samples}"
         y_cache_folder = f"./cache/_y_{num_common_samples}"
         os.makedirs(x_cache_folder, exist_ok=True)
@@ -260,24 +305,31 @@ class ReadTab(QWidget):
 
         # Save new CSV files with intersection samples only
         for file_info in self.file_info_list:
-            feature_label, entity_type, id_type, file_path = file_info[:4]
+            fill0, feature_label, entity_type, id_type, file_path = file_info
+
+            if fill0 or not file_path.strip():
+                continue
+
             df = pd.read_csv(file_path)
-            df_intersection = df[df.iloc[:, 0].isin(intersection_samples)]
-            
-            # Rename the first column for Clinical files
-            if entity_type == "Clinical":
-                df_intersection.rename(columns={df_intersection.columns[0]: "Sample_ID"}, inplace=True)
-        
-            # New filename with row count appended
+
+            df = df[df.iloc[:, 0].isin(intersection_samples)]
+
+            if entity_type == "Label":
+                df.rename(columns={df.columns[0]: "Sample_ID"}, inplace=True)
+
             base_name = os.path.basename(file_path)
-            if entity_type == "Clinical":
-                new_file_path = os.path.join(y_cache_folder, f"{base_name.replace('.csv', '')}_{num_common_samples}.csv")
-            else:
-                new_file_path = os.path.join(x_cache_folder, f"{base_name.replace('.csv', '')}_{num_common_samples}.csv")
-                
-            df_intersection.to_csv(new_file_path, index=False)
-            
-            # Update file path in file_info_list
-            file_info[3] = new_file_path  # Update the file path to the new file
+            new_file_path = os.path.join(
+                y_cache_folder if entity_type == "Label" else x_cache_folder,
+                f"{base_name.replace('.csv', '')}_{num_common_samples}.csv"
+            )
+
+            df.to_csv(new_file_path, index=False)
+            file_info[4] = new_file_path  # Update new path
+        
+        # Add intersection sample list to file_info for downstream usage
+        for file_info in self.file_info_list:
+            file_info.append(sorted(intersection_samples))
+
+        print(f"[Debug] Intersection samples: {intersection_samples}")
 
         return num_common_samples

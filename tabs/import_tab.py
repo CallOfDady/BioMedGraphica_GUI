@@ -17,6 +17,9 @@ class UploadRow(QWidget):
         self.add_button.setFixedSize(30, 30)
         self.remove_button.setFixedSize(30, 30)
 
+        self.fill0_checkbox = QCheckBox()
+        self.fill0_checkbox.setToolTip("Fill 0")
+
         # Omics Feature Label input
         self.feature_label = QLineEdit()
         self.feature_label.setFixedWidth(300)
@@ -25,7 +28,7 @@ class UploadRow(QWidget):
         # Data Type dropdown
         self.data_type = QComboBox()
         self.data_type.setFixedWidth(300)
-        self.data_type.addItems(["Gene", "Transcript", "Protein", "Promoter", "Drug", "Disease", "Phenotype", "MicroBiome", "Clinical"])
+        self.data_type.addItems(["Gene", "Transcript", "Protein", "Promoter", "Drug", "Disease", "Phenotype", "MicroBiome", "Label"])
         self.data_type.setEditable(True)
         self.data_type.lineEdit().setPlaceholderText("Data Type")
         self.data_type.setCurrentIndex(-1)
@@ -40,7 +43,7 @@ class UploadRow(QWidget):
             "Disease": ["OMIM_ID", "ICD11_ID", "ICD10_ID", "DO_ID", "SnomedCT_ID", "UMLS_ID", "MeSHID", "Mondo_ID"],
             "Phenotype": ["Phenotype_Name", "HPO_ID", "OMIM_ID", "Orpha_ID", "UMLS_ID"], 
             "MicroBiome": ["NCBI_ID", "SILVA_ID", "Greengenes_ID", "RDP_ID", "RNACentral_ID", "GTDB_ID"],
-            "Clinical": [""]
+            "Label": [""]
         }
 
         self.id_type = QComboBox()
@@ -65,6 +68,7 @@ class UploadRow(QWidget):
         # Add widgets to the layout
         self.layout.addWidget(self.add_button)
         self.layout.addWidget(self.remove_button)
+        self.layout.addWidget(self.fill0_checkbox)
         self.layout.addWidget(self.feature_label)
         self.layout.addWidget(self.data_type)
         self.layout.addWidget(self.id_type)
@@ -124,18 +128,22 @@ class UploadRow(QWidget):
             self.insert_callback(self)
 
     def get_file_info(self):
-        """Get feature label, Data Type, id type, file path"""
-        return (self.feature_label.text(), 
+        """Get fill0, feature label, Data Type, id type, file path"""
+        return (self.fill0_checkbox.isChecked(),
+                self.feature_label.text(), 
                 self.data_type.currentText(), 
                 self.id_type.currentText(), 
                 self.path_display.text())
 
-    def set_file_info(self, feature_label, data_type, id_type, file_path):
-        """Set feature label, Data Type, id type, file path"""
+    def set_file_info(self, fill0, feature_label, data_type, id_type, file_path):
+        """Set fill0, feature label, Data Type, id type, file path"""
+        self.fill0_checkbox.setChecked(bool(fill0))
         self.feature_label.setText(feature_label)
         self.data_type.setCurrentText(data_type)
         self.id_type.setCurrentText(id_type)
         self.path_display.setText(file_path)
+
+
 
 class ImportTab(QWidget):
     def __init__(self, parent=None):
@@ -144,11 +152,12 @@ class ImportTab(QWidget):
         # Main layout
         self.main_layout = QVBoxLayout(self)
         
-        # Track if "Clinical" has been selected
-        self.clinical_selected = False
+        # Track if "Label" has been selected
+        self.label_selected = False
 
         # Config file label and buttons at the top
         self.setup_config_controls()
+        self.setup_table_header()
 
         # Upload rows
         self.upload_rows = []
@@ -167,6 +176,42 @@ class ImportTab(QWidget):
         # Initial N upload rows
         for _ in range(4):
             self.add_row()
+
+    def setup_table_header(self):
+        header_layout = QHBoxLayout()
+
+
+        add_remove_fill0_label = QLabel("Add/Remove   Fill 0")
+        add_remove_fill0_label.setAlignment(Qt.AlignCenter)
+        add_remove_fill0_label.setFixedWidth(120)
+
+        feature_label = QLabel("Omics Feature Label")
+        feature_label.setFixedWidth(300)
+
+        data_type_label = QLabel("Data Type")
+        data_type_label.setFixedWidth(300)
+
+        id_type_label = QLabel("ID Type")
+        id_type_label.setFixedWidth(400)
+
+        path_label = QLabel("File Path")
+        path_label.setFixedWidth(200)
+
+        file_ops_label = QLabel("Upload/Clear")
+        file_ops_label.setFixedWidth(70)
+
+        # Font and color settings for labels
+        for label in [add_remove_fill0_label, feature_label, data_type_label, id_type_label, path_label, file_ops_label]:
+            label.setStyleSheet("color: gray; font-size: 12px;")
+
+        header_layout.addWidget(add_remove_fill0_label)
+        header_layout.addWidget(feature_label)
+        header_layout.addWidget(data_type_label)
+        header_layout.addWidget(id_type_label)
+        header_layout.addWidget(path_label)
+        header_layout.addWidget(file_ops_label)
+
+        self.main_layout.addLayout(header_layout)
 
     def setup_config_controls(self):
         """Setup config file label and buttons in a single row."""
@@ -202,7 +247,7 @@ class ImportTab(QWidget):
     def add_row(self, after_row=None):
         """Add a new row to the upload area"""
         row = UploadRow(self, remove_callback=self.remove_row, insert_callback=self.add_row)
-        row.data_type.currentTextChanged.connect(self.check_clinical_selection)  # Connect signal to check Clinical selection
+        row.data_type.currentTextChanged.connect(self.check_label_selection)  # Connect signal to check Label selection
         if after_row:
             index = self.upload_rows.index(after_row) + 1
             self.upload_rows.insert(index, row)
@@ -211,13 +256,13 @@ class ImportTab(QWidget):
             self.upload_rows.append(row)
             self.upload_rows_layout.addWidget(row)
 
-    def check_clinical_selection(self):
-        """Ensure only one row can have 'Clinical' selected as data type."""
-        clinical_rows = [row for row in self.upload_rows if row.data_type.currentText() == "Clinical"]
-        if len(clinical_rows) > 1:
-            # More than one Clinical selected, revert the latest selection and show a message
-            QMessageBox.warning(self, "Selection Error", "Only one 'Clinical' data type can be selected.")
-            for row in clinical_rows[1:]:  # Revert all except the first Clinical selection
+    def check_label_selection(self):
+        """Ensure only one row can have 'Label' selected as data type."""
+        label_rows = [row for row in self.upload_rows if row.data_type.currentText() == "Label"]
+        if len(label_rows) > 1:
+            # More than one Label selected, revert the latest selection and show a message
+            QMessageBox.warning(self, "Selection Error", "Only one 'Label' data type can be selected.")
+            for row in label_rows[1:]:  # Revert all except the first Label selection
                 row.data_type.setCurrentIndex(-1)
 
     def remove_row(self, row):
@@ -228,38 +273,33 @@ class ImportTab(QWidget):
             row.deleteLater()
 
     def get_all_file_info(self):
-        """Get file info from all rows, allowing feature_label and id_type to be empty if data_type is Clinical."""
+        """Get file info from all rows, allowing feature_label and id_type to be empty if data_type is Label."""
         file_info_list = []
         for row in self.upload_rows:
-            feature_label, data_type, id_type, file_path = row.get_file_info()
+            fill0, feature_label, data_type, id_type, file_path = row.get_file_info()
             
-            # If data_type is not Clinical, ensure feature_label and id_type are filled
-            if data_type != "Clinical":
+            # If data_type is not Label, ensure feature_label and id_type are filled
+            if data_type != "Label":
                 if not feature_label:
                     return None, "Missing Omics Feature Label"
                 if not id_type:
                     return None, "Invalid ID Type"
             
-            # Ensure file_path is valid for all data types
-            if not file_path or not os.path.exists(file_path):
-                return None, "Invalid File Path"
-            
             # Append the row's data to file_info_list
-            file_info_list.append((feature_label, data_type, id_type, file_path))
-            
+            file_info_list.append((fill0, feature_label, data_type, id_type, file_path))
+
         return file_info_list, None
 
     def set_all_file_info(self, file_info_list):
-        """Set file info into rows and adjust rows based on the list size"""
         for row in self.upload_rows:
             self.upload_rows_layout.removeWidget(row)
             row.deleteLater()
         self.upload_rows.clear()
 
         for file_info in file_info_list:
-            feature_label, data_type, id_type, file_path = file_info
+            fill0, feature_label, data_type, id_type, file_path = file_info
             self.add_row()
-            self.upload_rows[-1].set_file_info(feature_label, data_type, id_type, file_path)
+            self.upload_rows[-1].set_file_info(fill0, feature_label, data_type, id_type, file_path)
 
     def import_config_file(self):
         """Import a CSV config file and populate the fields, converting all values to strings."""
@@ -274,8 +314,10 @@ class ImportTab(QWidget):
         if file_path:
             try:
                 df = pd.read_csv(file_path, dtype=str)  # Read all values as strings
-                required_columns = ['Feature Label', 'Data Type', 'ID Type', 'File Path']
+                required_columns = ['Fill 0', 'Feature Label', 'Data Type', 'ID Type', 'File Path']
                 if set(required_columns).issubset(df.columns):
+                    df = df[required_columns].fillna('')
+                    df['Fill 0'] = df['Fill 0'].map({'True': True, 'False': False}).fillna(False)
                     file_info_list = df[required_columns].fillna('').values.tolist()  # Fill NaN with empty strings
                     self.set_all_file_info(file_info_list)
                 else:
@@ -303,7 +345,7 @@ class ImportTab(QWidget):
         )
         if file_path:
             try:
-                df = pd.DataFrame(file_info_list, columns=['Feature Label', 'Data Type', 'ID Type', 'File Path'])
+                df = pd.DataFrame(file_info_list, columns=['Fill 0', 'Feature Label', 'Data Type', 'ID Type', 'File Path'])
                 df.to_csv(file_path, index=False)
             except Exception as e:
                 print(f"Failed to export config file: {e}")

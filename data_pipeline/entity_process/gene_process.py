@@ -4,90 +4,97 @@ import pandas as pd
 import numpy as np
 import os
 
-def process_gene(entity_type, id_type, file_path, selected_column, feature_label, database_path):
-    """Process Gene data."""
-    print(f"Processing Gene: {entity_type}, ID Type: {id_type}, File: {file_path}, Column: {selected_column}, Feature Label: {feature_label}")
-    
-    gene_csv_path = os.path.join(database_path, "Entity", "Gene", "biomedgraphica_gene.csv")
-    gene_entity_data = pd.read_csv(gene_csv_path)
-        
-    # Determine the separator based on the file extension
-    if file_path.endswith('.txt') or file_path.endswith('.tsv'):
-        sep = '\t'
-    elif file_path.endswith('.csv'):
-        sep = ','
-    else:
-        raise ValueError("Unsupported file type. Please provide a .txt, .tsv, or .csv file.")
+def process_gene(entity_type, id_type, file_path, selected_column, feature_label, database_path, fill0=False, sample_ids=None):
+    print(f"Processing gene - fill0={fill0}, Feature Label: {feature_label}")
 
-    def process_gene_expression(gene_entity_data):
-        """Process Gene Expression data."""
-        print(f"Processing Gene Expression for {entity_type} with Feature Label: {feature_label}")
-        print("Not implemented yet. Use transcriptomics entity instead.")
+    # Load BioMedGraphica mapping table
+    gene_csv_path = os.path.join(database_path, "Entity", "Gene", "BioMedGraphica_Conn_Gene.csv")
+    entity_data = pd.read_csv(gene_csv_path)
+    bmg_ids = entity_data["BioMedGraphica_Conn_ID"].drop_duplicates().tolist()
 
-    def process_gene_cnv(gene_entity_data):
-        """Process Gene CNV data, map Sample_ID to MedGraphica_ID, and export mapping."""
-        print(f"Processing Gene CNV for {entity_type} with Feature Label: {feature_label}")
+    # ========== FILL0 ==========
+    if fill0:
+        if sample_ids is None:
+            raise ValueError("sample_ids must be provided when fill0=True")
 
-        # Step 1: Read the CNV file (in the format Sample_ID | Gene1 | Gene2 | ...)
-        cnv = pd.read_csv(file_path, sep=sep)
+        data_matrix = pd.DataFrame(0, index=sample_ids, columns=bmg_ids)
+        data_matrix.index.name = "Sample_ID"
+        data_matrix.reset_index(inplace=True)
 
-        # Step 2: Transpose the CNV data to Gene_Name | S1 | S2 | ... format
-        cnv_transposed = cnv.set_index(selected_column).T.reset_index()
-        cnv_transposed.rename(columns={'index': id_type}, inplace=True)
+        # output_file_path = f'cache/{feature_label.lower()}.csv'
+        # data_matrix.to_csv(output_file_path, index=False)
 
-        # Step 3: Merge with gene_entity_data to map to MedGraphica_ID
-        gene_entity_data = gene_entity_data[[id_type, 'BioMedGraphica_ID']].copy()
+        npy_output_path = f'cache/{feature_label.lower()}.npy'
+        np.save(npy_output_path, data_matrix.drop(columns=["Sample_ID"]).values)
+        print(f"[fill0] Expression matrix saved to: {npy_output_path}")
 
-        # Merge the CNV data with the gene entity data on id_type
-        cnv_merged = pd.merge(
-            cnv_transposed,
-            gene_entity_data,
-            on=id_type,
-            how='inner'
-        )
-
-        # Step 4: Extract the id_type and MedGraphica_ID columns as the mapping table
-        # This will create a mapping between the original id_type (e.g., Gene_Name) and MedGraphica_ID
-        mapping_table = cnv_merged[[id_type, 'BioMedGraphica_ID']].drop_duplicates()
-        mapping_table = mapping_table.rename(columns={id_type: 'Original_ID'})
-    
-        # Save the mapping table to a separate CSV file
+        # Save empty mapping
         map_output_file = f'cache/raw_id_mapping/{feature_label.lower()}_id_map.csv'
-        mapping_table.to_csv(map_output_file, sep=",", index=False)
-        print(f"mapping saved to {map_output_file}")
+        mapping_df = pd.DataFrame({
+            "BioMedGraphica_Conn_ID": bmg_ids,
+            "Original_ID": ["" for _ in bmg_ids]
+        })
+        mapping_df.to_csv(map_output_file, index=False)
+        print(f"[fill0] Mapping saved to: {map_output_file}")
+        return
 
-        # Step 5: Drop the 'id_type' column after merging
-        cnv_merged.drop(columns=[id_type], inplace=True)
+    # ========== NORMAL ==========
+    sep = '\t' if file_path.endswith(('.tsv', '.txt')) else ','
+    df = pd.read_csv(file_path, sep=sep)
 
-        # Step 6: Ensure 'BioMedGraphica_ID' is the first column
-        cols = ['BioMedGraphica_ID'] + [col for col in cnv_merged.columns if col not in ['BioMedGraphica_ID']]
-        cnv_data = cnv_merged[cols]
+    # Rename sample ID column
+    df.rename(columns={selected_column: "Sample_ID"}, inplace=True)
 
-        # Select numeric columns (which are now samples, i.e., S1, S2, etc.)
-        numeric_cols = cnv_data.select_dtypes(include=[np.number]).columns.tolist()
+    # Melt to long format
+    melted = df.melt(id_vars="Sample_ID", var_name="Original_ID", value_name="value")
 
-        # Group by 'BioMedGraphica_ID' and calculate the mean for all numeric columns
-        cnv_data.loc[:, numeric_cols] = cnv_data[numeric_cols].fillna(0)
-        cnv_data = cnv_data.groupby('BioMedGraphica_ID')[numeric_cols].mean()
+    # Identify columns (genes) that were used in input file
+    used_ids = set(df.columns) - {"Sample_ID"}
 
-        # Reset the index to turn 'BioMedGraphica_ID' back into a column
-        cnv_data.reset_index(inplace=True)
+    # Expand mapping: split id_type field on ';' and explode
+    mapping_raw = entity_data[[id_type, "BioMedGraphica_Conn_ID"]].dropna()
+    mapping_raw[id_type] = mapping_raw[id_type].astype(str).str.strip()
+    mapping_expanded = mapping_raw.assign(
+        Original_ID=mapping_raw[id_type].str.split(";")
+    ).explode("Original_ID")
+    mapping_expanded["Original_ID"] = mapping_expanded["Original_ID"].str.strip()
 
-        # Step 7: Transpose the data back to the original format (Sample_ID | Gene1 | Gene2 | ...)
-        cnv_final = cnv_data.set_index('BioMedGraphica_ID').T.reset_index()
-        cnv_final.rename(columns={'index': 'Sample_ID'}, inplace=True)
+    # Filter mapping to only those IDs actually used in the input file
+    mapping_df = mapping_expanded[mapping_expanded["Original_ID"].isin(used_ids)]
+    mapping_df = mapping_df[["Original_ID", "BioMedGraphica_Conn_ID"]].drop_duplicates()
 
-        # Export the final processed CNV data to a CSV file
-        output_file_path = f'cache/{feature_label.lower()}.csv'
-        cnv_final.to_csv(output_file_path, sep=",", index=False)
+    # Merge data with mapping
+    merged = pd.merge(melted, mapping_df, on="Original_ID", how="inner")
 
-        print(f"CNV data processing completed. Output saved to {output_file_path}")
+    # Pivot to wide matrix
+    expr = merged.pivot_table(index="Sample_ID", columns="BioMedGraphica_Conn_ID", values="value", fill_value=0)
+    expr = expr.reindex(columns=bmg_ids, fill_value=0)  # Ensure full coverage
+    expr = expr.copy()
+    expr.reset_index(inplace=True)
 
-    # Check if the feature_label contains "expression" or "cnv"
-    if "expression" in feature_label.lower():
-        process_gene_expression(gene_entity_data)
-    elif "cnv" in feature_label.lower():
-        process_gene_cnv(gene_entity_data)
-    else:
-        print(f"Processing for Feature Label: {feature_label} is not implemented yet.")
-        # Leave space for other feature_label handling in the future
+    # Save expression matrix
+    # output_file_path = f'cache/{feature_label.lower()}.csv'
+    # expr.to_csv(output_file_path, index=False)
+    # print(f"[normal] gene data saved to: {output_file_path}")
+
+    npy_output_path = f'cache/{feature_label.lower()}.npy'
+    np.save(npy_output_path, expr.drop(columns="Sample_ID").values)
+    print(f"[normal] gene data saved to: {npy_output_path} (as .npy)")
+
+
+    # Final mapping: group used Original_IDs by BMG ID
+    grouped_mapping_df = (
+        mapping_df.groupby("BioMedGraphica_Conn_ID")["Original_ID"]
+        .apply(lambda x: ";".join(sorted(set(str(i) for i in x if pd.notna(i) and str(i).strip()))))
+        .reset_index()
+    )
+
+    # Ensure all BMG IDs included (fill empty if not used)
+    final_mapping_df = pd.DataFrame({"BioMedGraphica_Conn_ID": bmg_ids}).merge(
+        grouped_mapping_df, on="BioMedGraphica_Conn_ID", how="left"
+    ).fillna({"Original_ID": ""})
+
+    # Save mapping table
+    map_output_file = f'cache/raw_id_mapping/{feature_label.lower()}_id_map.csv'
+    final_mapping_df.to_csv(map_output_file, index=False)
+    print(f"[normal] Mapping saved to: {map_output_file}")
