@@ -1,5 +1,9 @@
 # BioMedGraphica_GUI
 
+## ⚠️ This project is no longer maintained
+
+Please check the latest version here: [BioMedGraphica_WebApp](https://github.com/CallOfDady/BioMedGraphica_WebApp)
+
 ## Usage Notes
 
 ### Database Preparation and Access
